@@ -1,17 +1,12 @@
 # ktikz
 
-Minimal TikZ editor prototype with split view:
+Reset baseline for the new app design.
 
-- Left: LaTeX/TikZ source editor
-- Right: preview (first PDF page rendered to PNG)
-- Bottom: live LaTeX compiler output
-- Top menu/toolbar actions: `Load` and `Compile`
+Current behavior:
 
-## Requirements
-
-- Qt5 or Qt6 Widgets development packages
-- `pdflatex` in `PATH`
-- `pdftoppm` in `PATH` (from `poppler-utils`) for preview conversion
+- KDE-native main window (`KMainWindow`)
+- Menu + toolbar actions with KDE theme icons
+- Central canvas shows only a coordinate grid at startup
 
 ## Build
 
@@ -25,8 +20,3 @@ cmake --build build -j
 ```bash
 ./build/ktikz
 ```
-
-## Notes
-
-- `Compile` runs `pdflatex` on a temporary file.
-- On success it runs `pdftoppm` and refreshes the right pane preview.
