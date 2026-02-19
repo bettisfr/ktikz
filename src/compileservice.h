@@ -14,7 +14,7 @@ public:
     explicit compileservice(QObject *parent = nullptr);
 
     bool is_busy() const;
-    void compile(const QString &source_text, int grid_step_mm);
+    void compile(const QString &source_text, int grid_step_mm, int grid_extent_cm);
 
 signals:
     void output_text(const QString &text);
@@ -27,7 +27,7 @@ private slots:
 private:
     bool ensure_work_dir();
     static QString format_step(double step);
-    static QString inject_grid(const QString &source, int grid_step_mm);
+    static QString inject_grid(const QString &source, int grid_step_mm, int grid_extent_cm);
 
     QProcess proc_;
     QString work_dir_path_;

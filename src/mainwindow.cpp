@@ -17,6 +17,7 @@
 #include <QMenuBar>
 #include <QPlainTextEdit>
 #include <QSplitter>
+#include <QSpinBox>
 #include <QStatusBar>
 #include <QTextStream>
 #include <QToolBar>
@@ -26,6 +27,17 @@
 #include "compileservice.h"
 #include "coordinateparser.h"
 #include "pdfcanvas.h"
+
+namespace {
+QString wrap_tikz_document(const QString &tikz_body) {
+    return "\\documentclass[tikz,border=10pt]{standalone}\n"
+           "\\usepackage{tikz}\n"
+           "\\begin{document}\n"
+           "\\begin{tikzpicture}\n" + tikz_body +
+           "\\end{tikzpicture}\n"
+           "\\end{document}\n";
+}
+} // namespace
 
 mainwindow::mainwindow(QWidget *parent) : KMainWindow(parent) {
     setWindowTitle("KTikZ");
@@ -47,18 +59,8 @@ mainwindow::mainwindow(QWidget *parent) : KMainWindow(parent) {
     editor_font.setPointSize(12);
     editor_view_->setConfigValue(QStringLiteral("font"), editor_font);
 
-    editor_doc_->setText(
-        "\\documentclass[tikz,border=10pt]{standalone}\n"
-        "\\usepackage{tikz}\n"
-        "\\begin{document}\n"
-        "\\begin{tikzpicture}\n"
-        "  \\draw (0,0) -- (2,0);\n"
-        "  \\draw[blue,dashed,thick,->] (0,0) -- (1,1) -- (2,0.5) -- (3,1.4);\n"
-        "  \\draw (1.2,-0.7) circle (0.5);\n"
-        "  \\draw (2.2,-0.9) rectangle (3.4,0.1);\n"
-        "  \\node at (1.8,1.8) {Demo label};\n"
-        "\\end{tikzpicture}\n"
-        "\\end{document}\n");
+    editor_doc_->setText(wrap_tikz_document(
+        "  \\draw[blue,thick] (0,0) .. controls (1.5,2.0) and (3.0,-1.0) .. (4.0,1.0);\n"));
 
     preview_canvas_ = new pdfcanvas(this);
 
@@ -84,9 +86,17 @@ mainwindow::mainwindow(QWidget *parent) : KMainWindow(parent) {
     grid_step_combo_->addItem("1 mm", 1);
     grid_step_combo_->addItem("0 (free)", 0);
     grid_step_combo_->setCurrentIndex(0);
+    auto *extent_label = new QLabel("Extent:", controls_row);
+    grid_extent_spin_ = new QSpinBox(controls_row);
+    grid_extent_spin_->setRange(20, 100);
+    grid_extent_spin_->setSingleStep(5);
+    grid_extent_spin_->setSuffix(" cm");
+    grid_extent_spin_->setValue(grid_extent_cm_);
 
     controls_layout->addWidget(step_label);
     controls_layout->addWidget(grid_step_combo_);
+    controls_layout->addWidget(extent_label);
+    controls_layout->addWidget(grid_extent_spin_);
     controls_layout->addStretch(1);
 
     right_layout->addWidget(controls_row, 0);
@@ -111,7 +121,12 @@ mainwindow::mainwindow(QWidget *parent) : KMainWindow(parent) {
     compile_service_ = new compileservice(this);
 
     connect(preview_canvas_, &pdfcanvas::coordinate_dragged, this, &mainwindow::on_coordinate_dragged);
+    connect(preview_canvas_, &pdfcanvas::circle_radius_dragged, this, &mainwindow::on_circle_radius_dragged);
+    connect(preview_canvas_, &pdfcanvas::ellipse_radii_dragged, this, &mainwindow::on_ellipse_radii_dragged);
+    connect(preview_canvas_, &pdfcanvas::bezier_control_dragged, this, &mainwindow::on_bezier_control_dragged);
+    connect(preview_canvas_, &pdfcanvas::rectangle_corner_dragged, this, &mainwindow::on_rectangle_corner_dragged);
     connect(grid_step_combo_, &QComboBox::currentIndexChanged, this, &mainwindow::on_grid_step_changed);
+    connect(grid_extent_spin_, &QSpinBox::valueChanged, this, &mainwindow::on_grid_extent_changed);
 
     connect(compile_service_, &compileservice::output_text, this, &mainwindow::on_compile_service_output);
     connect(compile_service_, &compileservice::compile_finished, this, &mainwindow::on_compile_finished);
@@ -125,6 +140,7 @@ mainwindow::mainwindow(QWidget *parent) : KMainWindow(parent) {
 void mainwindow::create_menu_and_toolbar() {
     auto *file_menu = menuBar()->addMenu("File");
     auto *build_menu = menuBar()->addMenu("Build");
+    auto *examples_menu = menuBar()->addMenu("Examples");
 
     auto *load_act = new QAction(QIcon::fromTheme("document-open"), "Load", this);
     auto *compile_act = new QAction(QIcon::fromTheme("system-run"), "Compile", this);
@@ -141,6 +157,38 @@ void mainwindow::create_menu_and_toolbar() {
     connect(load_act, &QAction::triggered, this, &mainwindow::load_file);
     connect(compile_act, &QAction::triggered, this, &mainwindow::compile);
     connect(quit_act, &QAction::triggered, this, &QWidget::close);
+
+    auto add_example = [this, examples_menu](const QString &label, const QString &body) {
+        auto *act = new QAction(label, this);
+        connect(act, &QAction::triggered, this, [this, body, label]() {
+            if (!editor_doc_) {
+                return;
+            }
+            editor_doc_->setText(wrap_tikz_document(body));
+            statusBar()->showMessage("Loaded example: " + label, 1500);
+            if (compile_service_ && !compile_service_->is_busy()) {
+                compile();
+            }
+        });
+        examples_menu->addAction(act);
+    };
+
+    add_example("Line", "  \\draw[thick] (0,0) -- (4,2);\n");
+    add_example("Polyline", "  \\draw[blue,dashed,thick,->] (0,0) -- (1,1.5) -- (2.2,0.3) -- (3.8,1.8);\n");
+    add_example("Circle", "  \\draw[thick] (0,0) circle (1.5);\n");
+    add_example("Rectangle", "  \\draw[thick] (-1.5,-1) rectangle (2,1.2);\n");
+    add_example("Ellipse", "  \\draw[thick] (0,0) ellipse (2 and 1);\n");
+    add_example("Bezier", "  \\draw[blue,thick] (0,0) .. controls (1.5,2.0) and (3.0,-1.0) .. (4.0,1.0);\n");
+    add_example(
+        "Mixed Playground",
+        "  \\draw[->,thick] (-1.5,0) -- (10.5,0);\n"
+        "  \\draw[->,thick] (0,-1.5) -- (0,6.0);\n"
+        "  \\draw[blue,dashed,thick,->] (0.5,0.4) -- (2.0,2.2) -- (4.2,0.9) -- (6.8,2.8);\n"
+        "  \\draw[thick] (2.4,1.1) circle (0.9);\n"
+        "  \\draw[thick] (6.6,2.7) ellipse (1.8 and 0.8);\n"
+        "  \\draw[thick] (7.4,-0.8) rectangle (9.8,1.4);\n"
+        "  \\draw[red,thick] (1.0,4.2) .. controls (3.2,5.4) and (5.9,2.2) .. (8.8,4.8);\n"
+        "  \\node at (9.3,5.4) {KTikZ};\n");
 
     file_menu->addAction(load_act);
     file_menu->addSeparator();
@@ -183,8 +231,16 @@ void mainwindow::compile() {
 
     const QString source_text = editor_doc_->text();
     coordinate_refs_ = coordinateparser::extract_refs(source_text);
+    circle_refs_ = coordinateparser::extract_circle_refs(source_text);
+    ellipse_refs_ = coordinateparser::extract_ellipse_refs(source_text);
+    bezier_refs_ = coordinateparser::extract_bezier_refs(source_text);
+    rectangle_refs_ = coordinateparser::extract_rectangle_refs(source_text);
     preview_canvas_->set_coordinates(coordinateparser::extract_pairs(source_text));
-    compile_service_->compile(source_text, grid_display_mm_);
+    preview_canvas_->set_circles(coordinateparser::extract_circle_pairs(source_text));
+    preview_canvas_->set_ellipses(coordinateparser::extract_ellipse_pairs(source_text));
+    preview_canvas_->set_beziers(coordinateparser::extract_bezier_pairs(source_text));
+    preview_canvas_->set_rectangles(coordinateparser::extract_rectangle_pairs(source_text));
+    compile_service_->compile(source_text, grid_display_mm_, grid_extent_cm_);
     statusBar()->showMessage("Compiling...");
 }
 
@@ -238,6 +294,148 @@ void mainwindow::on_coordinate_dragged(int index, double x, double y) {
     compile();
 }
 
+void mainwindow::on_circle_radius_dragged(int index, double radius) {
+    if (!editor_doc_ || !compile_service_) {
+        return;
+    }
+    if (compile_service_->is_busy()) {
+        return;
+    }
+    if (index < 0 || index >= static_cast<int>(circle_refs_.size())) {
+        return;
+    }
+
+    const circle_ref ref = circle_refs_[index];
+    QString text = editor_doc_->text();
+    if (ref.radius_end <= ref.radius_start || ref.radius_end > text.size()) {
+        return;
+    }
+
+    const QString replacement = coordinateparser::format_number(radius);
+    text.replace(ref.radius_start, ref.radius_end - ref.radius_start, replacement);
+    editor_doc_->setText(text);
+    compile();
+}
+
+void mainwindow::on_ellipse_radii_dragged(int index, double rx, double ry) {
+    if (!editor_doc_ || !compile_service_) {
+        return;
+    }
+    if (compile_service_->is_busy()) {
+        return;
+    }
+    if (index < 0 || index >= static_cast<int>(ellipse_refs_.size())) {
+        return;
+    }
+
+    const ellipse_ref ref = ellipse_refs_[index];
+    QString text = editor_doc_->text();
+    if (ref.rx_end <= ref.rx_start || ref.ry_end <= ref.ry_start) {
+        return;
+    }
+    if (ref.rx_end > text.size() || ref.ry_end > text.size()) {
+        return;
+    }
+
+    const QString rx_str = coordinateparser::format_number(rx);
+    const QString ry_str = coordinateparser::format_number(ry);
+
+    // Replace from right to left so offsets remain valid.
+    if (ref.rx_start > ref.ry_start) {
+        text.replace(ref.rx_start, ref.rx_end - ref.rx_start, rx_str);
+        text.replace(ref.ry_start, ref.ry_end - ref.ry_start, ry_str);
+    } else {
+        text.replace(ref.ry_start, ref.ry_end - ref.ry_start, ry_str);
+        text.replace(ref.rx_start, ref.rx_end - ref.rx_start, rx_str);
+    }
+
+    editor_doc_->setText(text);
+    compile();
+}
+
+void mainwindow::on_bezier_control_dragged(int index, int control_idx, double x, double y) {
+    if (!editor_doc_ || !compile_service_) {
+        return;
+    }
+    if (compile_service_->is_busy()) {
+        return;
+    }
+    if (index < 0 || index >= static_cast<int>(bezier_refs_.size())) {
+        return;
+    }
+
+    const bezier_ref ref = bezier_refs_[index];
+    QString text = editor_doc_->text();
+    int x_start = 0;
+    int x_end = 0;
+    int y_start = 0;
+    int y_end = 0;
+    if (control_idx == 1) {
+        x_start = ref.x1_start;
+        x_end = ref.x1_end;
+        y_start = ref.y1_start;
+        y_end = ref.y1_end;
+    } else if (control_idx == 2) {
+        x_start = ref.x2_start;
+        x_end = ref.x2_end;
+        y_start = ref.y2_start;
+        y_end = ref.y2_end;
+    } else {
+        return;
+    }
+    if (x_end <= x_start || y_end <= y_start || x_end > text.size() || y_end > text.size()) {
+        return;
+    }
+
+    const QString x_str = coordinateparser::format_number(x);
+    const QString y_str = coordinateparser::format_number(y);
+    if (x_start > y_start) {
+        text.replace(x_start, x_end - x_start, x_str);
+        text.replace(y_start, y_end - y_start, y_str);
+    } else {
+        text.replace(y_start, y_end - y_start, y_str);
+        text.replace(x_start, x_end - x_start, x_str);
+    }
+    editor_doc_->setText(text);
+    compile();
+}
+
+void mainwindow::on_rectangle_corner_dragged(int index, double x2, double y2) {
+    if (!editor_doc_ || !compile_service_) {
+        return;
+    }
+    if (compile_service_->is_busy()) {
+        return;
+    }
+    if (index < 0 || index >= static_cast<int>(rectangle_refs_.size())) {
+        return;
+    }
+
+    const rectangle_ref ref = rectangle_refs_[index];
+    QString text = editor_doc_->text();
+    if (ref.x2_end <= ref.x2_start || ref.y2_end <= ref.y2_start) {
+        return;
+    }
+    if (ref.x2_end > text.size() || ref.y2_end > text.size()) {
+        return;
+    }
+
+    const QString x2_str = coordinateparser::format_number(x2);
+    const QString y2_str = coordinateparser::format_number(y2);
+
+    // Replace from right to left so offsets remain valid.
+    if (ref.x2_start > ref.y2_start) {
+        text.replace(ref.x2_start, ref.x2_end - ref.x2_start, x2_str);
+        text.replace(ref.y2_start, ref.y2_end - ref.y2_start, y2_str);
+    } else {
+        text.replace(ref.y2_start, ref.y2_end - ref.y2_start, y2_str);
+        text.replace(ref.x2_start, ref.x2_end - ref.x2_start, x2_str);
+    }
+
+    editor_doc_->setText(text);
+    compile();
+}
+
 void mainwindow::on_grid_step_changed(int) {
     const int selected = grid_step_combo_ ? grid_step_combo_->currentData().toInt() : 10;
     grid_snap_mm_ = qMax(0, selected);
@@ -250,6 +448,14 @@ void mainwindow::on_grid_step_changed(int) {
             : ("Grid/Snap step: " + QString::number(grid_snap_mm_) + " mm"),
         1500);
 
+    if (compile_service_ && !compile_service_->is_busy()) {
+        compile();
+    }
+}
+
+void mainwindow::on_grid_extent_changed(int value) {
+    grid_extent_cm_ = qBound(20, value, 100);
+    statusBar()->showMessage("Grid extent: " + QString::number(grid_extent_cm_) + " cm", 1500);
     if (compile_service_ && !compile_service_->is_busy()) {
         compile();
     }

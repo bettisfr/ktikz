@@ -37,7 +37,7 @@ QString compileservice::format_step(double step) {
     return s;
 }
 
-QString compileservice::inject_grid(const QString &source, int grid_step_mm) {
+QString compileservice::inject_grid(const QString &source, int grid_step_mm, int grid_extent_cm) {
     static const QRegularExpression begin_tikz_pattern(R"(\\begin\{tikzpicture\}(?:\[[^\]]*\])?)");
     static const QRegularExpression end_tikz_pattern(R"(\\end\{tikzpicture\})");
 
@@ -49,15 +49,19 @@ QString compileservice::inject_grid(const QString &source, int grid_step_mm) {
 
     const bool draw_grid = grid_step_mm > 0;
     const QString step_expr = draw_grid ? format_step(static_cast<double>(grid_step_mm) / 10.0) : QStringLiteral("1");
+    const int clamped_extent = qBound(20, grid_extent_cm, 100);
+    const double half = static_cast<double>(clamped_extent) / 2.0;
+    const QString min_xy = format_step(-half);
+    const QString max_xy = format_step(half);
 
     QString grid_block = "\n  % ktikz preview grid\n";
     if (draw_grid) {
         if (grid_step_mm != 10) {
-            grid_block += "  \\draw[step=" + step_expr + ", gray!18, very thin] (-10,-10) grid (10,10);\n";
+            grid_block += "  \\draw[step=" + step_expr + ", gray!18, very thin] (" + min_xy + "," + min_xy + ") grid (" + max_xy + "," + max_xy + ");\n";
         }
-        grid_block += "  \\draw[step=1, gray!38, thin] (-10,-10) grid (10,10);\n";
-        grid_block += "  \\draw[gray!50, thin] (-10,0) -- (10,0);\n";
-        grid_block += "  \\draw[gray!50, thin] (0,-10) -- (0,10);\n";
+        grid_block += "  \\draw[step=1, gray!38, thin] (" + min_xy + "," + min_xy + ") grid (" + max_xy + "," + max_xy + ");\n";
+        grid_block += "  \\draw[gray!50, thin] (" + min_xy + ",0) -- (" + max_xy + ",0);\n";
+        grid_block += "  \\draw[gray!50, thin] (0," + min_xy + ") -- (0," + max_xy + ");\n";
     }
 
     QString marker_block;
@@ -75,7 +79,7 @@ QString compileservice::inject_grid(const QString &source, int grid_step_mm) {
     return out;
 }
 
-void compileservice::compile(const QString &source_text, int grid_step_mm) {
+void compileservice::compile(const QString &source_text, int grid_step_mm, int grid_extent_cm) {
     if (is_busy()) {
         emit output_text("[Compile] Already running");
         return;
@@ -95,7 +99,7 @@ void compileservice::compile(const QString &source_text, int grid_step_mm) {
     }
 
     QTextStream out(&tex_file);
-    out << inject_grid(source_text, grid_step_mm);
+    out << inject_grid(source_text, grid_step_mm, grid_extent_cm);
     tex_file.close();
 
     emit output_text("\n[Compile] " + QDateTime::currentDateTime().toString(Qt::ISODate));

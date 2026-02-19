@@ -17,11 +17,19 @@ public:
     explicit pdfcanvas(QWidget *parent = nullptr);
 
     void set_coordinates(const std::vector<coord_pair> &coords);
+    void set_circles(const std::vector<circle_pair> &circles);
+    void set_ellipses(const std::vector<ellipse_pair> &ellipses);
+    void set_beziers(const std::vector<bezier_pair> &beziers);
+    void set_rectangles(const std::vector<rectangle_pair> &rectangles);
     void set_snap_mm(int mm);
     bool load_pdf(const QString &pdf_path);
 
 signals:
     void coordinate_dragged(int index, double x, double y);
+    void circle_radius_dragged(int index, double radius);
+    void ellipse_radii_dragged(int index, double rx, double ry);
+    void bezier_control_dragged(int index, int control_idx, double x, double y);
+    void rectangle_corner_dragged(int index, double x2, double y2);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -38,7 +46,17 @@ private:
     QPointF world_to_screen(double x, double y) const;
     bool screen_to_world(const QPointF &p, QPointF &world_out) const;
     int hit_test_marker(const QPointF &pos) const;
+    int hit_test_circle_marker(const QPointF &pos) const;
+    int hit_test_ellipse_rx_marker(const QPointF &pos) const;
+    int hit_test_ellipse_ry_marker(const QPointF &pos) const;
+    int hit_test_bezier_c1_marker(const QPointF &pos) const;
+    int hit_test_bezier_c2_marker(const QPointF &pos) const;
+    int hit_test_rectangle_marker(const QPointF &pos) const;
     void draw_coordinate_markers(QPainter &painter);
+    void draw_circle_markers(QPainter &painter);
+    void draw_ellipse_markers(QPainter &painter);
+    void draw_bezier_markers(QPainter &painter);
+    void draw_rectangle_markers(QPainter &painter);
 
     QPdfDocument pdf_document_;
     QImage rendered_image_;
@@ -49,7 +67,21 @@ private:
     QPointF last_drag_pos_{0.0, 0.0};
     bool marker_dragging_ = false;
     int active_marker_index_ = -1;
+    bool circle_dragging_ = false;
+    int active_circle_index_ = -1;
+    bool ellipse_dragging_ = false;
+    int active_ellipse_index_ = -1;
+    bool ellipse_dragging_rx_ = true;
+    bool bezier_dragging_ = false;
+    int active_bezier_index_ = -1;
+    bool bezier_dragging_c1_ = true;
+    bool rectangle_dragging_ = false;
+    int active_rectangle_index_ = -1;
     std::vector<coord_pair> coordinates_;
+    std::vector<circle_pair> circles_;
+    std::vector<ellipse_pair> ellipses_;
+    std::vector<bezier_pair> beziers_;
+    std::vector<rectangle_pair> rectangles_;
     bool calibration_valid_ = false;
     QPointF origin_px_{0.0, 0.0};
     QPointF axis_x_px_{1.0, 0.0};
