@@ -3,6 +3,7 @@
 #include <KTextEditor/Document>
 #include <KTextEditor/Editor>
 #include <KTextEditor/View>
+#include <KActionCollection>
 
 #include <QAction>
 #include <QComboBox>
@@ -17,11 +18,13 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
-#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSplitter>
 #include <QSpinBox>
 #include <QStatusBar>
+#include <QTextCursor>
+#include <QTextEdit>
+#include <QTextCharFormat>
 #include <QTextStream>
 #include <QToolBar>
 #include <QVBoxLayout>
@@ -41,11 +44,26 @@ QString wrap_tikz_document(const QString &tikz_body) {
            "\\end{tikzpicture}\n"
            "\\end{document}\n";
 }
+
+void append_colored_log(QTextEdit *output, const QString &text, const QColor &color) {
+    if (!output) {
+        return;
+    }
+    QTextCursor cursor(output->document());
+    cursor.movePosition(QTextCursor::End);
+    QTextCharFormat fmt;
+    fmt.setForeground(color);
+    cursor.insertText(text, fmt);
+    if (!text.endsWith('\n')) {
+        cursor.insertText("\n", fmt);
+    }
+    output->setTextCursor(cursor);
+    output->ensureCursorVisible();
+}
 } // namespace
 
 mainwindow::mainwindow(QWidget *parent) : KMainWindow(parent) {
-    const QString app_name = QString::fromLatin1(appconfig::APP_NAME);
-    setWindowTitle(app_name);
+    update_window_title();
     resize(1200, 800);
 
     auto *editor_backend = KTextEditor::Editor::instance();
@@ -57,6 +75,7 @@ mainwindow::mainwindow(QWidget *parent) : KMainWindow(parent) {
     editor_doc_ = editor_backend->createDocument(this);
     editor_view_ = editor_doc_->createView(this);
     editor_doc_->setMode(QStringLiteral("LaTeX"));
+    connect(editor_doc_, &KTextEditor::Document::textChanged, this, &mainwindow::on_document_modified_changed);
 
     QFont editor_font;
     editor_font.setFamily(QStringLiteral("Monospace"));
@@ -65,6 +84,8 @@ mainwindow::mainwindow(QWidget *parent) : KMainWindow(parent) {
     editor_view_->setConfigValue(QStringLiteral("font"), editor_font);
 
     editor_doc_->setText(QString());
+    editor_doc_->setModified(false);
+    update_window_title();
 
     preview_canvas_ = new pdfcanvas(this);
 
@@ -107,7 +128,7 @@ mainwindow::mainwindow(QWidget *parent) : KMainWindow(parent) {
     splitter->addWidget(right_pane);
     splitter->setSizes({600, 600});
 
-    output_ = new QPlainTextEdit(this);
+    output_ = new QTextEdit(this);
     output_->setReadOnly(true);
     output_->setPlaceholderText("Compilation output will appear here...");
     auto *output_section = new QWidget(this);
@@ -176,13 +197,27 @@ void mainwindow::closeEvent(QCloseEvent *event) {
     }
 }
 
+void mainwindow::update_window_title() {
+    const QString app_name = QString::fromLatin1(appconfig::APP_NAME);
+    const QString file_part =
+        current_file_path_.isEmpty() ? QStringLiteral("untitled") : QFileInfo(current_file_path_).fileName();
+    const bool modified = editor_doc_ && editor_doc_->isModified();
+    setWindowTitle(app_name + " - " + file_part + (modified ? "*" : ""));
+}
+
 void mainwindow::create_menu_and_toolbar() {
     auto *file_menu = menuBar()->addMenu("File");
+    auto *edit_menu = menuBar()->addMenu("Edit");
     auto *build_menu = menuBar()->addMenu("Build");
     auto *examples_menu = menuBar()->addMenu("Examples");
     auto *help_menu = menuBar()->addMenu("Help");
 
+    auto *new_act = new QAction(QIcon::fromTheme("document-new"), "New", this);
     auto *load_act = new QAction(QIcon::fromTheme("document-open"), "Load", this);
+    auto *save_act = new QAction(QIcon::fromTheme("document-save"), "Save", this);
+    auto *save_as_act = new QAction(QIcon::fromTheme("document-save-as"), "Save As...", this);
+    auto *undo_act = new QAction(QIcon::fromTheme("edit-undo"), "Undo", this);
+    auto *redo_act = new QAction(QIcon::fromTheme("edit-redo"), "Redo", this);
     auto *indent_act = new QAction(QIcon::fromTheme("format-indent-more"), "Indent", this);
     auto *compile_act = new QAction(QIcon::fromTheme("system-run"), "Compile", this);
     auto *quit_act = new QAction(QIcon::fromTheme("application-exit"), "Quit", this);
@@ -194,12 +229,34 @@ void mainwindow::create_menu_and_toolbar() {
     compile_act->setIconVisibleInMenu(true);
     quit_act->setIconVisibleInMenu(true);
 
+    new_act->setShortcut(QKeySequence::New);
     load_act->setShortcut(QKeySequence("Ctrl+O"));
+    save_act->setShortcut(QKeySequence::Save);
+    save_as_act->setShortcut(QKeySequence("Ctrl+Shift+S"));
+    undo_act->setShortcut(QKeySequence::Undo);
+    redo_act->setShortcut(QKeySequence::Redo);
     indent_act->setShortcut(QKeySequence("Ctrl+Shift+I"));
     compile_act->setShortcut(QKeySequence("F5"));
     quit_act->setShortcut(QKeySequence::Quit);
 
+    connect(new_act, &QAction::triggered, this, &mainwindow::new_file);
     connect(load_act, &QAction::triggered, this, &mainwindow::load_file);
+    connect(save_act, &QAction::triggered, this, &mainwindow::save_file);
+    connect(save_as_act, &QAction::triggered, this, &mainwindow::save_file_as);
+    connect(undo_act, &QAction::triggered, this, [this]() {
+        if (editor_view_ && editor_view_->actionCollection()) {
+            if (QAction *a = editor_view_->actionCollection()->action(QStringLiteral("edit_undo"))) {
+                a->trigger();
+            }
+        }
+    });
+    connect(redo_act, &QAction::triggered, this, [this]() {
+        if (editor_view_ && editor_view_->actionCollection()) {
+            if (QAction *a = editor_view_->actionCollection()->action(QStringLiteral("edit_redo"))) {
+                a->trigger();
+            }
+        }
+    });
     connect(indent_act, &QAction::triggered, this, &mainwindow::indent_latex);
     connect(compile_act, &QAction::triggered, this, &mainwindow::compile);
     connect(quit_act, &QAction::triggered, this, &QWidget::close);
@@ -209,7 +266,8 @@ void mainwindow::create_menu_and_toolbar() {
             this,
             "About " + app_name,
             app_name + "\n\n"
-            "A KDE/Qt editor for TikZ with live PDF preview and interactive shape editing.");
+            "A KDE/Qt editor for TikZ with live PDF preview and interactive shape editing.\n\n"
+            "Francesco Betti Sorbelli <francesco.bettisorbelli@unipg.it>");
     });
     connect(about_kde_act, &QAction::triggered, this, [this]() {
         const QString app_name = QString::fromLatin1(appconfig::APP_NAME);
@@ -241,22 +299,31 @@ void mainwindow::create_menu_and_toolbar() {
     add_example("Circle", "  \\draw[thick] (0,0) circle (1.5);\n");
     add_example("Rectangle", "  \\draw[thick] (-1.5,-1) rectangle (2,1.2);\n");
     add_example("Ellipse", "  \\draw[thick] (0,0) ellipse (2 and 1);\n");
-    add_example("Bezier", "  \\draw[blue,thick] (0,0) .. controls (1.5,2.0) and (3.0,-1.0) .. (4.0,1.0);\n");
+    add_example(
+        "Bezier",
+        "  \\draw[blue,very thick] (0,0) .. controls (1.5,2.0) and (3.0,-1.0) .. (4.0,1.0)\n"
+        "                       .. controls (5.2,2.3) and (6.8,0.2) .. (8.0,1.6);\n");
     add_example(
         "Mixed Playground",
         "  \\draw[->,thick] (-9,0) -- (9,0);\n"
         "  \\draw[->,thick] (0,-9) -- (0,9);\n"
-        "  \\draw[blue,dashed,thick,->] (1,1) -- (2,3) -- (4,1) -- (6,3);\n"
-        "  \\draw[brown, thick] (-4,-3) circle (2);\n"
+        "  \\draw[blue,dashed,ultra thick,->] (1,1) -- (2,3) -- (4,1) -- (6,3)"
+        "                                -- (7.2,2.2) -- (8.0,4.0) -- (8.8,3.1);\n"
+        "  \\draw[brown, thick, fill=yellow, fill opacity=0.6] (-4,-3) circle (2);\n"
         "  \\draw[magenta, ultra thick, fill=green!20] (6,5) ellipse (2 and 1);\n"
         "  \\draw[orange,thick,fill=red,fill opacity=0.4] (2,-4) rectangle (6,-1);\n"
         "  \\draw[red,thick] (-4,4) .. controls (-6,6) and (-1,4) .. (-3,7)"
         "                   .. controls (-2,8.2) and (0.5,6.3) .. (1.2,7.1);\n"
-        "  \\node at (2,6) {KTikZ};\n");
+        "  \\node at (2,6) {KTikZ ... enjoy};\n");
 
+    file_menu->addAction(new_act);
     file_menu->addAction(load_act);
+    file_menu->addAction(save_act);
+    file_menu->addAction(save_as_act);
     file_menu->addSeparator();
     file_menu->addAction(quit_act);
+    edit_menu->addAction(undo_act);
+    edit_menu->addAction(redo_act);
     build_menu->addAction(compile_act);
     build_menu->addAction(indent_act);
     help_menu->addAction(about_ktikz_act);
@@ -265,9 +332,41 @@ void mainwindow::create_menu_and_toolbar() {
     auto *toolbar = addToolBar("Main");
     toolbar->setMovable(false);
     toolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    toolbar->addAction(new_act);
     toolbar->addAction(load_act);
+    toolbar->addSeparator();
+    toolbar->addAction(save_act);
+    toolbar->addAction(save_as_act);
+    toolbar->addSeparator();
+    toolbar->addAction(undo_act);
+    toolbar->addAction(redo_act);
+    toolbar->addSeparator();
     toolbar->addAction(indent_act);
     toolbar->addAction(compile_act);
+}
+
+void mainwindow::new_file() {
+    if (!editor_doc_) {
+        return;
+    }
+
+    if (editor_doc_->isModified()) {
+        const QMessageBox::StandardButton res = QMessageBox::question(
+            this,
+            "New file",
+            "Discard unsaved changes and create a new file?",
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);
+        if (res != QMessageBox::Yes) {
+            return;
+        }
+    }
+
+    editor_doc_->setText(QString());
+    current_file_path_.clear();
+    editor_doc_->setModified(false);
+    update_window_title();
+    statusBar()->showMessage("New file", 1500);
 }
 
 void mainwindow::load_file() {
@@ -288,8 +387,71 @@ void mainwindow::load_file() {
 
     QTextStream in(&file);
     editor_doc_->setText(in.readAll());
+    editor_doc_->setModified(false);
     current_file_path_ = path;
+    update_window_title();
     statusBar()->showMessage("Loaded " + QFileInfo(path).fileName(), 3000);
+}
+
+void mainwindow::save_file() {
+    if (!editor_doc_) {
+        return;
+    }
+
+    QString path = current_file_path_;
+    if (path.isEmpty()) {
+        save_file_as();
+        return;
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
+        statusBar()->showMessage("Save failed", 3000);
+        return;
+    }
+
+    QTextStream out(&file);
+    out << editor_doc_->text();
+    file.close();
+
+    current_file_path_ = path;
+    editor_doc_->setModified(false);
+    update_window_title();
+    statusBar()->showMessage("Saved " + QFileInfo(path).fileName(), 3000);
+}
+
+void mainwindow::save_file_as() {
+    if (!editor_doc_) {
+        return;
+    }
+
+    const QString path = QFileDialog::getSaveFileName(
+        this,
+        "Save As",
+        current_file_path_.isEmpty() ? QDir::homePath() : current_file_path_,
+        "TeX files (*.tex *.tikz);;All files (*)");
+    if (path.isEmpty()) {
+        return;
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
+        statusBar()->showMessage("Save failed", 3000);
+        return;
+    }
+
+    QTextStream out(&file);
+    out << editor_doc_->text();
+    file.close();
+
+    current_file_path_ = path;
+    editor_doc_->setModified(false);
+    update_window_title();
+    statusBar()->showMessage("Saved " + QFileInfo(path).fileName(), 3000);
+}
+
+void mainwindow::on_document_modified_changed(KTextEditor::Document *) {
+    update_window_title();
 }
 
 void mainwindow::compile() {
@@ -359,29 +521,24 @@ void mainwindow::indent_latex() {
 }
 
 void mainwindow::on_compile_service_output(const QString &text) {
-    if (!output_) {
-        return;
-    }
-    output_->moveCursor(QTextCursor::End);
-    output_->insertPlainText(text);
-    if (!text.endsWith('\n')) {
-        output_->insertPlainText("\n");
-    }
-    output_->moveCursor(QTextCursor::End);
+    append_colored_log(output_, text, QColor("#1f2937"));
 }
 
 void mainwindow::on_compile_finished(bool success, const QString &pdf_path, const QString &) {
     if (!success) {
+        append_colored_log(output_, "[Status] Compiled with errors", QColor("#dc2626"));
         statusBar()->showMessage("Compile failed", 3000);
         return;
     }
 
     if (!preview_canvas_->load_pdf(pdf_path)) {
         on_compile_service_output("[Preview] Failed to load generated PDF");
+        append_colored_log(output_, "[Status] Compiled with errors", QColor("#dc2626"));
         statusBar()->showMessage("Preview load failed", 3000);
         return;
     }
 
+    append_colored_log(output_, "[Status] Compiled successfully", QColor("#16a34a"));
     statusBar()->showMessage("Compile successful", 2500);
 }
 

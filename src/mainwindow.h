@@ -6,9 +6,9 @@
 
 #include "model.h"
 
-class QPlainTextEdit;
 class QComboBox;
 class QSpinBox;
+class QTextEdit;
 
 namespace KTextEditor {
 class Document;
@@ -28,7 +28,10 @@ protected:
     void closeEvent(QCloseEvent *event) override;
 
 private slots:
+    void new_file();
     void load_file();
+    void save_file();
+    void save_file_as();
     void compile();
     void indent_latex();
     void on_compile_service_output(const QString &text);
@@ -40,14 +43,16 @@ private slots:
     void on_rectangle_corner_dragged(int index, double x2, double y2);
     void on_grid_step_changed(int value);
     void on_grid_extent_changed(int value);
+    void on_document_modified_changed(KTextEditor::Document *document);
 
 private:
     void create_menu_and_toolbar();
+    void update_window_title();
 
     KTextEditor::Document *editor_doc_ = nullptr;
     KTextEditor::View *editor_view_ = nullptr;
     pdfcanvas *preview_canvas_ = nullptr;
-    QPlainTextEdit *output_ = nullptr;
+    QTextEdit *output_ = nullptr;
     QComboBox *grid_step_combo_ = nullptr;
     QSpinBox *grid_extent_spin_ = nullptr;
     compileservice *compile_service_ = nullptr;
