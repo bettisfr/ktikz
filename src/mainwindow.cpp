@@ -18,6 +18,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QPushButton>
 #include <QSplitter>
 #include <QSpinBox>
 #include <QStatusBar>
@@ -109,10 +110,30 @@ mainwindow::mainwindow(QWidget *parent) : KMainWindow(parent) {
     output_ = new QPlainTextEdit(this);
     output_->setReadOnly(true);
     output_->setPlaceholderText("Compilation output will appear here...");
+    auto *output_section = new QWidget(this);
+    auto *output_layout = new QVBoxLayout(output_section);
+    output_layout->setContentsMargins(6, 4, 6, 6);
+    output_layout->setSpacing(4);
+    auto *output_header = new QWidget(output_section);
+    auto *output_header_layout = new QHBoxLayout(output_header);
+    output_header_layout->setContentsMargins(0, 0, 0, 0);
+    output_header_layout->setSpacing(6);
+    auto *output_label = new QLabel("Console output", output_header);
+    auto *clear_log_btn = new QPushButton("Clear", output_header);
+    connect(clear_log_btn, &QPushButton::clicked, this, [this]() {
+        if (output_) {
+            output_->clear();
+        }
+    });
+    output_header_layout->addWidget(output_label);
+    output_header_layout->addStretch(1);
+    output_header_layout->addWidget(clear_log_btn);
+    output_layout->addWidget(output_header);
+    output_layout->addWidget(output_, 1);
 
     auto *main_splitter = new QSplitter(Qt::Vertical, this);
     main_splitter->addWidget(splitter);
-    main_splitter->addWidget(output_);
+    main_splitter->addWidget(output_section);
     main_splitter->setSizes({650, 150});
 
     auto *central = new QWidget(this);
@@ -162,6 +183,7 @@ void mainwindow::create_menu_and_toolbar() {
     auto *help_menu = menuBar()->addMenu("Help");
 
     auto *load_act = new QAction(QIcon::fromTheme("document-open"), "Load", this);
+    auto *indent_act = new QAction(QIcon::fromTheme("format-indent-more"), "Indent", this);
     auto *compile_act = new QAction(QIcon::fromTheme("system-run"), "Compile", this);
     auto *quit_act = new QAction(QIcon::fromTheme("application-exit"), "Quit", this);
     const QString app_name = QString::fromLatin1(appconfig::APP_NAME);
@@ -173,10 +195,12 @@ void mainwindow::create_menu_and_toolbar() {
     quit_act->setIconVisibleInMenu(true);
 
     load_act->setShortcut(QKeySequence("Ctrl+O"));
+    indent_act->setShortcut(QKeySequence("Ctrl+Shift+I"));
     compile_act->setShortcut(QKeySequence("F5"));
     quit_act->setShortcut(QKeySequence::Quit);
 
     connect(load_act, &QAction::triggered, this, &mainwindow::load_file);
+    connect(indent_act, &QAction::triggered, this, &mainwindow::indent_latex);
     connect(compile_act, &QAction::triggered, this, &mainwindow::compile);
     connect(quit_act, &QAction::triggered, this, &QWidget::close);
     connect(about_ktikz_act, &QAction::triggered, this, [this]() {
@@ -234,6 +258,7 @@ void mainwindow::create_menu_and_toolbar() {
     file_menu->addSeparator();
     file_menu->addAction(quit_act);
     build_menu->addAction(compile_act);
+    build_menu->addAction(indent_act);
     help_menu->addAction(about_ktikz_act);
     help_menu->addAction(about_kde_act);
 
@@ -241,6 +266,7 @@ void mainwindow::create_menu_and_toolbar() {
     toolbar->setMovable(false);
     toolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     toolbar->addAction(load_act);
+    toolbar->addAction(indent_act);
     toolbar->addAction(compile_act);
 }
 
@@ -284,6 +310,52 @@ void mainwindow::compile() {
     preview_canvas_->set_rectangles(coordinateparser::extract_rectangle_pairs(source_text));
     compile_service_->compile(source_text, grid_display_mm_, grid_extent_cm_);
     statusBar()->showMessage("Compiling...");
+}
+
+void mainwindow::indent_latex() {
+    if (!editor_doc_) {
+        return;
+    }
+
+    const QString text = editor_doc_->text();
+    const QStringList lines = text.split('\n', Qt::KeepEmptyParts);
+
+    auto count_occurrences = [](const QString &line, const QString &token) {
+        int count = 0;
+        int pos = 0;
+        while ((pos = line.indexOf(token, pos)) >= 0) {
+            ++count;
+            pos += token.size();
+        }
+        return count;
+    };
+
+    QStringList out_lines;
+    out_lines.reserve(lines.size());
+    int indent_level = 0;
+
+    for (const QString &line : lines) {
+        const QString trimmed = line.trimmed();
+
+        int pre_dedent = 0;
+        if (trimmed.startsWith("\\end{")) {
+            pre_dedent = 1;
+        }
+        indent_level = qMax(0, indent_level - pre_dedent);
+
+        if (trimmed.isEmpty()) {
+            out_lines.push_back(QString());
+        } else {
+            out_lines.push_back(QString(indent_level * 2, ' ') + trimmed);
+        }
+
+        const int begins = count_occurrences(trimmed, "\\begin{");
+        const int ends = count_occurrences(trimmed, "\\end{");
+        indent_level = qMax(0, indent_level + begins - ends);
+    }
+
+    editor_doc_->setText(out_lines.join('\n'));
+    statusBar()->showMessage("LaTeX indentation applied", 1500);
 }
 
 void mainwindow::on_compile_service_output(const QString &text) {

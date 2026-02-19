@@ -30,6 +30,7 @@ protected:
 private slots:
     void load_file();
     void compile();
+    void indent_latex();
     void on_compile_service_output(const QString &text);
     void on_compile_finished(bool success, const QString &pdf_path, const QString &message);
     void on_coordinate_dragged(int index, double x, double y);

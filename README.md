@@ -7,7 +7,8 @@ KTikZ is a KDE/Qt desktop editor for TikZ with live PDF preview and direct manip
 - Left pane: LaTeX/TikZ editor powered by `KTextEditor`
 - Right pane: compiled PDF preview rendered with `QPdfDocument`
 - Bottom pane: compilation log output
-- Menu/toolbar actions: `Load`, `Compile`, and `Examples`
+- Startup: empty editor and maximized window
+- Menu/toolbar actions: `Load`, `Indent`, `Compile`, `Examples`, `Help`
 
 ## Interactive Editing
 
@@ -26,6 +27,11 @@ Current editable primitives:
 - cubic Bezier curves (`control 1`, `control 2`)
 
 Marker changes update the source text and trigger recompilation.
+
+## Editing Utilities
+
+- `Indent` action (toolbar and Build menu) auto-formats LaTeX indentation using `\begin{...}` / `\end{...}` structure.
+- Console panel includes a `Clear` button to quickly reset compile output.
 
 ## Grid and Snap
 
@@ -51,6 +57,11 @@ The `Examples` menu includes ready-made snippets for:
 - ellipse
 - Bezier
 - mixed playground
+
+## Help Menu
+
+- `About KTikZ`
+- `About KDE`
 
 ## Build
 
