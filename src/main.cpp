@@ -42,6 +42,13 @@ struct CoordPair {
     double y = 0.0;
 };
 
+struct CoordRef {
+    int start = 0;
+    int end = 0;
+    double x = 0.0;
+    double y = 0.0;
+};
+
 class PdfCanvas : public QWidget {
     Q_OBJECT
 
@@ -55,6 +62,10 @@ public:
         update();
     }
 
+signals:
+    void coordinateDragged(int index, double x, double y);
+
+public:
     bool loadPdf(const QString &pdfPath) {
         renderedImage_ = QImage();
         renderedSize_ = QSize();
@@ -122,6 +133,16 @@ protected:
 
     void mousePressEvent(QMouseEvent *event) override {
         if (event->button() == Qt::LeftButton) {
+            if (calibrationValid_) {
+                const int idx = hitTestMarker(event->position());
+                if (idx >= 0) {
+                    markerDragging_ = true;
+                    activeMarkerIndex_ = idx;
+                    setCursor(Qt::CrossCursor);
+                    event->accept();
+                    return;
+                }
+            }
             dragging_ = true;
             lastDragPos_ = event->position();
             setCursor(Qt::ClosedHandCursor);
@@ -132,6 +153,17 @@ protected:
     }
 
     void mouseMoveEvent(QMouseEvent *event) override {
+        if (markerDragging_ && activeMarkerIndex_ >= 0 && activeMarkerIndex_ < static_cast<int>(coordinates_.size())) {
+            QPointF world;
+            if (screenToWorld(event->position(), world)) {
+                coordinates_[activeMarkerIndex_].x = world.x();
+                coordinates_[activeMarkerIndex_].y = world.y();
+                update();
+            }
+            event->accept();
+            return;
+        }
+
         if (!dragging_) {
             QWidget::mouseMoveEvent(event);
             return;
@@ -144,6 +176,17 @@ protected:
     }
 
     void mouseReleaseEvent(QMouseEvent *event) override {
+        if (event->button() == Qt::LeftButton && markerDragging_) {
+            markerDragging_ = false;
+            unsetCursor();
+            if (activeMarkerIndex_ >= 0 && activeMarkerIndex_ < static_cast<int>(coordinates_.size())) {
+                const CoordPair &c = coordinates_[activeMarkerIndex_];
+                emit coordinateDragged(activeMarkerIndex_, c.x, c.y);
+            }
+            activeMarkerIndex_ = -1;
+            event->accept();
+            return;
+        }
         if (event->button() == Qt::LeftButton && dragging_) {
             dragging_ = false;
             unsetCursor();
@@ -169,11 +212,11 @@ private:
                 const int b = qBlue(row[x]);
                 bool hit = false;
                 if (target == 'r') {
-                    hit = (r > 200 && g < 90 && b < 90);
+                    hit = (r > 120 && r > g + 35 && r > b + 35);
                 } else if (target == 'g') {
-                    hit = (g > 200 && r < 90 && b < 90);
+                    hit = (g > 120 && g > r + 35 && g > b + 35);
                 } else if (target == 'b') {
-                    hit = (b > 200 && r < 90 && g < 90);
+                    hit = (b > 120 && b > r + 35 && b > g + 35);
                 }
                 if (hit) {
                     sx += static_cast<double>(x);
@@ -182,7 +225,7 @@ private:
                 }
             }
         }
-        if (count < 3) {
+        if (count < 1) {
             return false;
         }
         centroidOut = QPointF(sx / count, sy / count);
@@ -217,6 +260,34 @@ private:
         return originPx_ + u * x + v * y;
     }
 
+    bool screenToWorld(const QPointF &p, QPointF &worldOut) const {
+        if (!calibrationValid_) {
+            return false;
+        }
+        const QPointF u = axisXPx_ - originPx_;
+        const QPointF v = axisYPx_ - originPx_;
+        const double det = u.x() * v.y() - u.y() * v.x();
+        if (std::abs(det) < 1e-9) {
+            return false;
+        }
+        const QPointF d = p - originPx_;
+        const double x = (d.x() * v.y() - d.y() * v.x()) / det;
+        const double y = (u.x() * d.y() - u.y() * d.x()) / det;
+        worldOut = QPointF(x, y);
+        return true;
+    }
+
+    int hitTestMarker(const QPointF &pos) const {
+        constexpr double threshold = 10.0;
+        for (int i = 0; i < static_cast<int>(coordinates_.size()); ++i) {
+            const QPointF p = worldToScreen(coordinates_[i].x, coordinates_[i].y);
+            if (QLineF(pos, p).length() <= threshold) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     void drawCoordinateMarkers(QPainter &painter) {
         if (!calibrationValid_ || coordinates_.empty()) {
             return;
@@ -240,6 +311,8 @@ private:
     QPointF panOffset_{0.0, 0.0};
     bool dragging_ = false;
     QPointF lastDragPos_{0.0, 0.0};
+    bool markerDragging_ = false;
+    int activeMarkerIndex_ = -1;
     std::vector<CoordPair> coordinates_;
     bool calibrationValid_ = false;
     QPointF originPx_{0.0, 0.0};
@@ -252,7 +325,7 @@ class MainWindow : public KMainWindow {
 
 public:
     MainWindow() {
-        setWindowTitle("ktikz");
+        setWindowTitle("KTikZ");
         resize(1200, 800);
 
         auto *editorBackend = KTextEditor::Editor::instance();
@@ -307,6 +380,7 @@ public:
         connect(compileProc_, &QProcess::readyReadStandardError, this, &MainWindow::onCompileOutput);
         connect(compileProc_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
                 this, &MainWindow::onCompileFinished);
+        connect(previewCanvas_, &PdfCanvas::coordinateDragged, this, &MainWindow::onCoordinateDragged);
 
         createMenuAndToolbar();
         statusBar()->showMessage("Ready");
@@ -392,9 +466,9 @@ private:
             "  \\draw[gray!60, thin] (-10,0) -- (10,0);\n"
             "  \\draw[gray!60, thin] (0,-10) -- (0,10);\n"
             "  % ktikz calibration markers (tiny)\n"
-            "  \\fill[draw=none,fill={rgb,255:red,255;green,0;blue,0}] (0,0) circle[radius=0.7pt];\n"
-            "  \\fill[draw=none,fill={rgb,255:red,0;green,255;blue,0}] (1,0) circle[radius=0.7pt];\n"
-            "  \\fill[draw=none,fill={rgb,255:red,0;green,0;blue,255}] (0,1) circle[radius=0.7pt];\n";
+            "  \\fill[draw=none,fill={rgb,255:red,255;green,0;blue,0}] (0,0) circle[radius=1.2pt];\n"
+            "  \\fill[draw=none,fill={rgb,255:red,0;green,255;blue,0}] (1,0) circle[radius=1.2pt];\n"
+            "  \\fill[draw=none,fill={rgb,255:red,0;green,0;blue,255}] (0,1) circle[radius=1.2pt];\n";
 
         QString out = source;
         out.insert(m.capturedEnd(0), gridBlock);
@@ -402,10 +476,20 @@ private:
     }
 
     static std::vector<CoordPair> extractCoordinates(const QString &source) {
+        std::vector<CoordPair> coords;
+        const std::vector<CoordRef> refs = extractCoordinateRefs(source);
+        coords.reserve(refs.size());
+        for (const CoordRef &r : refs) {
+            coords.push_back({r.x, r.y});
+        }
+        return coords;
+    }
+
+    static std::vector<CoordRef> extractCoordinateRefs(const QString &source) {
         static const QRegularExpression coordPattern(
             R"(\(\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*,\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*\))");
 
-        std::vector<CoordPair> coords;
+        std::vector<CoordRef> refs;
         QRegularExpressionMatchIterator it = coordPattern.globalMatch(source);
         while (it.hasNext()) {
             const QRegularExpressionMatch m = it.next();
@@ -416,9 +500,25 @@ private:
             if (!okX || !okY) {
                 continue;
             }
-            coords.push_back({x, y});
+            CoordRef ref;
+            ref.start = m.capturedStart(0);
+            ref.end = ref.start + m.capturedLength(0);
+            ref.x = x;
+            ref.y = y;
+            refs.push_back(ref);
         }
-        return coords;
+        return refs;
+    }
+
+    static QString formatNumber(double value) {
+        QString s = QString::number(value, 'f', 4);
+        while (s.contains('.') && (s.endsWith('0') || s.endsWith('.'))) {
+            s.chop(1);
+        }
+        if (s == "-0") {
+            s = "0";
+        }
+        return s;
     }
 
     void compile() {
@@ -434,6 +534,7 @@ private:
 
         const QString sourceText = editorDoc_->text();
         const QString compileSource = withInjectedGrid(sourceText);
+        coordinateRefs_ = extractCoordinateRefs(sourceText);
         previewCanvas_->setCoordinates(extractCoordinates(sourceText));
 
         QFile texFile(workDirPath_ + "/document.tex");
@@ -494,11 +595,32 @@ private:
         statusBar()->showMessage("Compile successful", 2500);
     }
 
+    void onCoordinateDragged(int index, double x, double y) {
+        if (index < 0 || index >= static_cast<int>(coordinateRefs_.size())) {
+            return;
+        }
+        if (compileProc_->state() != QProcess::NotRunning) {
+            return;
+        }
+
+        const CoordRef ref = coordinateRefs_[index];
+        QString text = editorDoc_->text();
+        if (ref.end <= ref.start || ref.end > text.size()) {
+            return;
+        }
+
+        const QString replacement = "(" + formatNumber(x) + "," + formatNumber(y) + ")";
+        text.replace(ref.start, ref.end - ref.start, replacement);
+        editorDoc_->setText(text);
+        compile();
+    }
+
     KTextEditor::Document *editorDoc_ = nullptr;
     KTextEditor::View *editorView_ = nullptr;
     PdfCanvas *previewCanvas_ = nullptr;
     QPlainTextEdit *output_ = nullptr;
     QProcess *compileProc_ = nullptr;
+    std::vector<CoordRef> coordinateRefs_;
 
     QString currentFilePath_;
     QString workDirPath_;
