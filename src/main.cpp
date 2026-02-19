@@ -14,6 +14,7 @@
 #include <QIcon>
 #include <QImage>
 #include <QKeySequence>
+#include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMouseEvent>
@@ -23,12 +24,15 @@
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
+#include <QComboBox>
+#include <QSpinBox>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QTemporaryDir>
 #include <QTextCursor>
 #include <QTextStream>
 #include <QToolBar>
+#include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 #include <QWidget>
@@ -62,13 +66,19 @@ public:
         update();
     }
 
+    void setSnapMm(int mm) {
+        snapMm_ = qMax(0, mm);
+    }
+
 signals:
     void coordinateDragged(int index, double x, double y);
+    void calibrationDebug(const QString &line);
 
 public:
     bool loadPdf(const QString &pdfPath) {
         renderedImage_ = QImage();
         renderedSize_ = QSize();
+        calibrationDebugPending_ = true;
         const QPdfDocument::Error err = pdfDocument_.load(pdfPath);
         update();
         return err == QPdfDocument::Error::None;
@@ -156,6 +166,11 @@ protected:
         if (markerDragging_ && activeMarkerIndex_ >= 0 && activeMarkerIndex_ < static_cast<int>(coordinates_.size())) {
             QPointF world;
             if (screenToWorld(event->position(), world)) {
+                if (snapMm_ > 0) {
+                    const double step = static_cast<double>(snapMm_) / 10.0; // 10mm == 1cm == 1 TikZ unit
+                    world.setX(std::round(world.x() / step) * step);
+                    world.setY(std::round(world.y() / step) * step);
+                }
                 coordinates_[activeMarkerIndex_].x = world.x();
                 coordinates_[activeMarkerIndex_].y = world.y();
                 update();
@@ -197,6 +212,13 @@ protected:
     }
 
 private:
+    static bool isNearColor(int r, int g, int b, int tr, int tg, int tb, int maxDistSq) {
+        const int dr = r - tr;
+        const int dg = g - tg;
+        const int db = b - tb;
+        return (dr * dr + dg * dg + db * db) <= maxDistSq;
+    }
+
     static bool findColorCentroid(const QImage &img, char target, QPointF &centroidOut) {
         if (img.isNull()) {
             return false;
@@ -204,20 +226,27 @@ private:
         double sx = 0.0;
         double sy = 0.0;
         int count = 0;
+
+        int tr = 0;
+        int tg = 0;
+        int tb = 0;
+        // Use uncommon signature colors so user drawings won't collide.
+        if (target == 'r') {         // origin marker
+            tr = 253; tg = 17; tb = 251;
+        } else if (target == 'g') {  // x-axis marker
+            tr = 19; tg = 251; tb = 233;
+        } else if (target == 'b') {  // y-axis marker
+            tr = 241; tg = 251; tb = 17;
+        }
+
+        const int maxDistSq = 55 * 55;
         for (int y = 0; y < img.height(); ++y) {
             const QRgb *row = reinterpret_cast<const QRgb *>(img.constScanLine(y));
             for (int x = 0; x < img.width(); ++x) {
                 const int r = qRed(row[x]);
                 const int g = qGreen(row[x]);
                 const int b = qBlue(row[x]);
-                bool hit = false;
-                if (target == 'r') {
-                    hit = (r > 120 && r > g + 35 && r > b + 35);
-                } else if (target == 'g') {
-                    hit = (g > 120 && g > r + 35 && g > b + 35);
-                } else if (target == 'b') {
-                    hit = (b > 120 && b > r + 35 && b > g + 35);
-                }
+                const bool hit = isNearColor(r, g, b, tr, tg, tb, maxDistSq);
                 if (hit) {
                     sx += static_cast<double>(x);
                     sy += static_cast<double>(y);
@@ -235,12 +264,25 @@ private:
     void updateCalibration(const QRect &targetRect) {
         calibrationValid_ = false;
         if (renderedImage_.isNull() || !targetRect.isValid()) {
+            if (calibrationDebugPending_) {
+                emit calibrationDebug("[Calib] No rendered image/target rect");
+                calibrationDebugPending_ = false;
+            }
             return;
         }
         QPointF redLocal, greenLocal, blueLocal;
-        if (!findColorCentroid(renderedImage_, 'r', redLocal) ||
-            !findColorCentroid(renderedImage_, 'g', greenLocal) ||
-            !findColorCentroid(renderedImage_, 'b', blueLocal)) {
+        const bool okR = findColorCentroid(renderedImage_, 'r', redLocal);
+        const bool okG = findColorCentroid(renderedImage_, 'g', greenLocal);
+        const bool okB = findColorCentroid(renderedImage_, 'b', blueLocal);
+        if (!okR || !okG || !okB) {
+            if (calibrationDebugPending_) {
+                emit calibrationDebug(
+                    "[Calib] Marker detection failed "
+                    "(R=" + QString(okR ? "ok" : "miss") +
+                    ", G=" + QString(okG ? "ok" : "miss") +
+                    ", B=" + QString(okB ? "ok" : "miss") + ")");
+                calibrationDebugPending_ = false;
+            }
             return;
         }
         const QPointF topLeft = targetRect.topLeft();
@@ -252,6 +294,16 @@ private:
         const QPointF v = axisYPx_ - originPx_;
         const double det = u.x() * v.y() - u.y() * v.x();
         calibrationValid_ = std::abs(det) > 1e-6;
+        if (calibrationDebugPending_) {
+            const QString msg =
+                "[Calib] R=(" + QString::number(originPx_.x(), 'f', 1) + "," + QString::number(originPx_.y(), 'f', 1) + ") "
+                "G=(" + QString::number(axisXPx_.x(), 'f', 1) + "," + QString::number(axisXPx_.y(), 'f', 1) + ") "
+                "B=(" + QString::number(axisYPx_.x(), 'f', 1) + "," + QString::number(axisYPx_.y(), 'f', 1) + ") "
+                "det=" + QString::number(det, 'f', 2) +
+                (calibrationValid_ ? " OK" : " INVALID");
+            emit calibrationDebug(msg);
+            calibrationDebugPending_ = false;
+        }
     }
 
     QPointF worldToScreen(double x, double y) const {
@@ -318,6 +370,8 @@ private:
     QPointF originPx_{0.0, 0.0};
     QPointF axisXPx_{1.0, 0.0};
     QPointF axisYPx_{0.0, -1.0};
+    int snapMm_ = 10;
+    bool calibrationDebugPending_ = false;
 };
 
 class MainWindow : public KMainWindow {
@@ -349,7 +403,17 @@ public:
             "\\usepackage{tikz}\n"
             "\\begin{document}\n"
             "\\begin{tikzpicture}\n"
-            "  \\draw (0,0) -- (2,1);\n"
+            "  \\draw[->,thick] (-1,0) -- (7,0);\n"
+            "  \\draw[->,thick] (0,-1) -- (0,5);\n"
+            "  \\draw[blue,very thick] (0,0) -- (4,2);\n"
+            "  \\draw[red,thick] (1,1) -- (3,4);\n"
+            "  \\draw[green!50!black,thick] (2,0.5) circle (1.2);\n"
+            "  \\draw[orange,thick] (0,0) .. controls (2,3) .. (5,1);\n"
+            "  \\fill[black] (0,0) circle (1.5pt) node[below left] {O};\n"
+            "  \\fill[black] (4,2) circle (1.5pt) node[above right] {(4,2)};\n"
+            "  \\fill[black] (3,4) circle (1.5pt) node[above right] {(3,4)};\n"
+            "  \\fill[black] (2,0.5) circle (1.5pt) node[below] {(2,0.5)};\n"
+            "  \\node at (5.5,3.8) {KTikZ demo};\n"
             "\\end{tikzpicture}\n"
             "\\end{document}\n");
 
@@ -357,12 +421,37 @@ public:
 
         auto *splitter = new QSplitter(Qt::Horizontal, this);
         splitter->addWidget(editorView_);
-        splitter->addWidget(previewCanvas_);
+        auto *rightPane = new QWidget(this);
+        auto *rightLayout = new QVBoxLayout(rightPane);
+        rightLayout->setContentsMargins(0, 0, 0, 0);
+        rightLayout->setSpacing(6);
+        rightLayout->addWidget(previewCanvas_, 1);
+
+        auto *controlsRow = new QWidget(rightPane);
+        auto *controlsLayout = new QHBoxLayout(controlsRow);
+        controlsLayout->setContentsMargins(6, 0, 6, 6);
+        controlsLayout->setSpacing(8);
+        auto *stepLabel = new QLabel("Grid/Snap:", controlsRow);
+        gridStepCombo_ = new QComboBox(controlsRow);
+        gridStepCombo_->addItem("10 mm", 10);
+        gridStepCombo_->addItem("5 mm", 5);
+        gridStepCombo_->addItem("2 mm", 2);
+        gridStepCombo_->addItem("1 mm", 1);
+        gridStepCombo_->addItem("0 (free)", 0);
+        gridStepCombo_->setCurrentIndex(0);
+        controlsLayout->addWidget(stepLabel);
+        controlsLayout->addWidget(gridStepCombo_);
+        controlsLayout->addStretch(1);
+        rightLayout->addWidget(controlsRow, 0);
+        splitter->addWidget(rightPane);
         splitter->setSizes({600, 600});
 
         output_ = new QPlainTextEdit(this);
         output_->setReadOnly(true);
         output_->setPlaceholderText("Compilation output will appear here...");
+        connect(previewCanvas_, &PdfCanvas::calibrationDebug, this, [this](const QString &line) {
+            output_->appendPlainText(line);
+        });
 
         auto *mainSplitter = new QSplitter(Qt::Vertical, this);
         mainSplitter->addWidget(splitter);
@@ -381,6 +470,8 @@ public:
         connect(compileProc_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
                 this, &MainWindow::onCompileFinished);
         connect(previewCanvas_, &PdfCanvas::coordinateDragged, this, &MainWindow::onCoordinateDragged);
+        connect(gridStepCombo_, &QComboBox::currentIndexChanged, this, &MainWindow::onGridStepChanged);
+        previewCanvas_->setSnapMm(gridSnapMm_);
 
         createMenuAndToolbar();
         statusBar()->showMessage("Ready");
@@ -453,25 +544,48 @@ private:
         return true;
     }
 
-    static QString withInjectedGrid(const QString &source) {
+    static QString formatStep(double step) {
+        QString s = QString::number(step, 'f', 4);
+        while (s.contains('.') && (s.endsWith('0') || s.endsWith('.'))) {
+            s.chop(1);
+        }
+        return s;
+    }
+
+    static QString withInjectedGrid(const QString &source, int gridStepMm) {
         static const QRegularExpression beginTikzPattern(R"(\\begin\{tikzpicture\}(?:\[[^\]]*\])?)");
+        static const QRegularExpression endTikzPattern(R"(\\end\{tikzpicture\})");
         const QRegularExpressionMatch m = beginTikzPattern.match(source);
-        if (!m.hasMatch()) {
+        const QRegularExpressionMatch mEnd = endTikzPattern.match(source);
+        if (!m.hasMatch() || !mEnd.hasMatch()) {
             return source;
         }
 
-        const QString gridBlock =
-            "\n  % ktikz preview grid\n"
-            "  \\draw[step=1, gray!35, very thin] (-10,-10) grid (10,10);\n"
-            "  \\draw[gray!60, thin] (-10,0) -- (10,0);\n"
-            "  \\draw[gray!60, thin] (0,-10) -- (0,10);\n"
-            "  % ktikz calibration markers (tiny)\n"
-            "  \\fill[draw=none,fill={rgb,255:red,255;green,0;blue,0}] (0,0) circle[radius=1.2pt];\n"
-            "  \\fill[draw=none,fill={rgb,255:red,0;green,255;blue,0}] (1,0) circle[radius=1.2pt];\n"
-            "  \\fill[draw=none,fill={rgb,255:red,0;green,0;blue,255}] (0,1) circle[radius=1.2pt];\n";
+        const bool drawGrid = gridStepMm > 0;
+        const QString stepExpr = drawGrid ? formatStep(static_cast<double>(gridStepMm) / 10.0) : QStringLiteral("1");
+        QString gridBlock = "\n  % ktikz preview grid\n";
+        if (drawGrid) {
+            // Always keep 10mm (1 TikZ unit) lines prominent as major references.
+            if (gridStepMm != 10) {
+                gridBlock += "  \\draw[step=" + stepExpr + ", gray!18, very thin] (-10,-10) grid (10,10);\n";
+            }
+            gridBlock += "  \\draw[step=1, gray!38, thin] (-10,-10) grid (10,10);\n";
+            gridBlock += "  \\draw[gray!50, thin] (-10,0) -- (10,0);\n";
+            gridBlock += "  \\draw[gray!50, thin] (0,-10) -- (0,10);\n";
+        }
+        QString markerBlock;
+        markerBlock += "\n  % ktikz calibration markers (top layer)\n";
+        markerBlock += "  \\fill[draw=none,fill={rgb,255:red,253;green,17;blue,251}] (0,0) circle[radius=1.2pt];\n";
+        markerBlock += "  \\fill[draw=none,fill={rgb,255:red,19;green,251;blue,233}] (1,0) circle[radius=1.2pt];\n";
+        markerBlock += "  \\fill[draw=none,fill={rgb,255:red,241;green,251;blue,17}] (0,1) circle[radius=1.2pt];\n";
 
         QString out = source;
         out.insert(m.capturedEnd(0), gridBlock);
+        // Insert markers right before \end{tikzpicture} so user elements cannot hide them.
+        const int endPosAfterGrid = out.lastIndexOf("\\end{tikzpicture}");
+        if (endPosAfterGrid >= 0) {
+            out.insert(endPosAfterGrid, markerBlock);
+        }
         return out;
     }
 
@@ -533,7 +647,7 @@ private:
         }
 
         const QString sourceText = editorDoc_->text();
-        const QString compileSource = withInjectedGrid(sourceText);
+        const QString compileSource = withInjectedGrid(sourceText, gridDisplayMm_);
         coordinateRefs_ = extractCoordinateRefs(sourceText);
         previewCanvas_->setCoordinates(extractCoordinates(sourceText));
 
@@ -615,12 +729,30 @@ private:
         compile();
     }
 
+    void onGridStepChanged(int) {
+        const int selected = gridStepCombo_ ? gridStepCombo_->currentData().toInt() : 10;
+        gridSnapMm_ = qMax(0, selected);
+        gridDisplayMm_ = (gridSnapMm_ == 0) ? 10 : gridSnapMm_;
+        previewCanvas_->setSnapMm(gridSnapMm_);
+        statusBar()->showMessage(
+            gridSnapMm_ == 0
+                ? "Grid: 10 mm, Snap: free hand"
+                : ("Grid/Snap step: " + QString::number(gridSnapMm_) + " mm"),
+            1500);
+        if (compileProc_ && compileProc_->state() == QProcess::NotRunning) {
+            compile();
+        }
+    }
+
     KTextEditor::Document *editorDoc_ = nullptr;
     KTextEditor::View *editorView_ = nullptr;
     PdfCanvas *previewCanvas_ = nullptr;
     QPlainTextEdit *output_ = nullptr;
+    QComboBox *gridStepCombo_ = nullptr;
     QProcess *compileProc_ = nullptr;
     std::vector<CoordRef> coordinateRefs_;
+    int gridSnapMm_ = 10;
+    int gridDisplayMm_ = 10;
 
     QString currentFilePath_;
     QString workDirPath_;
