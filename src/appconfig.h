@@ -2,7 +2,7 @@
 #define APPCONFIG_H
 
 namespace appconfig {
-inline constexpr const char *APP_NAME = "KTikZ";
+inline constexpr const char *APP_NAME = "QTikZ";
 inline constexpr const char *APP_ICON_NAME = "applications-graphics";
 }
 

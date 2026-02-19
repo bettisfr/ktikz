@@ -1,10 +1,5 @@
 #include "mainwindow.h"
 
-#include <KTextEditor/Document>
-#include <KTextEditor/Editor>
-#include <KTextEditor/View>
-#include <KActionCollection>
-
 #include <QAction>
 #include <QComboBox>
 #include <QCloseEvent>
@@ -18,13 +13,17 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSplitter>
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QTextCursor>
+#include <QTextDocument>
 #include <QTextEdit>
 #include <QTextCharFormat>
+#include <QSyntaxHighlighter>
+#include <QRegularExpression>
 #include <QTextStream>
 #include <QToolBar>
 #include <QVBoxLayout>
@@ -36,6 +35,46 @@
 #include "appconfig.h"
 
 namespace {
+class latexhighlighter : public QSyntaxHighlighter {
+public:
+    explicit latexhighlighter(QTextDocument *doc) : QSyntaxHighlighter(doc) {
+        QTextCharFormat command_fmt;
+        command_fmt.setForeground(QColor("#1d4ed8"));
+        command_fmt.setFontWeight(QFont::Bold);
+        rules_.push_back({QRegularExpression(R"(\\[A-Za-z@]+)"), command_fmt});
+
+        QTextCharFormat env_fmt;
+        env_fmt.setForeground(QColor("#7c3aed"));
+        rules_.push_back({QRegularExpression(R"(\\(begin|end)\{[^}]+\})"), env_fmt});
+
+        QTextCharFormat number_fmt;
+        number_fmt.setForeground(QColor("#059669"));
+        rules_.push_back({QRegularExpression(R"([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)"), number_fmt});
+
+        QTextCharFormat comment_fmt;
+        comment_fmt.setForeground(QColor("#6b7280"));
+        rules_.push_back({QRegularExpression(R"(%[^\n]*)"), comment_fmt});
+    }
+
+protected:
+    void highlightBlock(const QString &text) override {
+        for (const rule &r : rules_) {
+            QRegularExpressionMatchIterator it = r.pattern.globalMatch(text);
+            while (it.hasNext()) {
+                const QRegularExpressionMatch m = it.next();
+                setFormat(m.capturedStart(), m.capturedLength(), r.format);
+            }
+        }
+    }
+
+private:
+    struct rule {
+        QRegularExpression pattern;
+        QTextCharFormat format;
+    };
+    std::vector<rule> rules_;
+};
+
 QString wrap_tikz_document(const QString &tikz_body) {
     return "\\documentclass[tikz,border=10pt]{standalone}\n"
            "\\usepackage{tikz}\n"
@@ -62,35 +101,27 @@ void append_colored_log(QTextEdit *output, const QString &text, const QColor &co
 }
 } // namespace
 
-mainwindow::mainwindow(QWidget *parent) : KMainWindow(parent) {
+mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
     update_window_title();
     resize(1200, 800);
-
-    auto *editor_backend = KTextEditor::Editor::instance();
-    if (!editor_backend) {
-        statusBar()->showMessage("KTextEditor backend unavailable");
-        return;
-    }
-
-    editor_doc_ = editor_backend->createDocument(this);
-    editor_view_ = editor_doc_->createView(this);
-    editor_doc_->setMode(QStringLiteral("LaTeX"));
-    connect(editor_doc_, &KTextEditor::Document::textChanged, this, &mainwindow::on_document_modified_changed);
 
     QFont editor_font;
     editor_font.setFamily(QStringLiteral("Monospace"));
     editor_font.setStyleHint(QFont::Monospace);
     editor_font.setPointSize(12);
-    editor_view_->setConfigValue(QStringLiteral("font"), editor_font);
-
-    editor_doc_->setText(QString());
-    editor_doc_->setModified(false);
+    editor_ = new QPlainTextEdit(this);
+    editor_->setFont(editor_font);
+    editor_->setTabStopDistance(editor_->fontMetrics().horizontalAdvance(QStringLiteral(" ")) * 4);
+    editor_->setPlainText(QString());
+    editor_->document()->setModified(false);
+    connect(editor_->document(), &QTextDocument::modificationChanged, this, &mainwindow::on_document_modified_changed);
+    new latexhighlighter(editor_->document());
     update_window_title();
 
     preview_canvas_ = new pdfcanvas(this);
 
     auto *splitter = new QSplitter(Qt::Horizontal, this);
-    splitter->addWidget(editor_view_);
+    splitter->addWidget(editor_);
 
     auto *right_pane = new QWidget(this);
     auto *right_layout = new QVBoxLayout(right_pane);
@@ -201,7 +232,7 @@ void mainwindow::update_window_title() {
     const QString app_name = QString::fromLatin1(appconfig::APP_NAME);
     const QString file_part =
         current_file_path_.isEmpty() ? QStringLiteral("untitled") : QFileInfo(current_file_path_).fileName();
-    const bool modified = editor_doc_ && editor_doc_->isModified();
+    const bool modified = editor_ && editor_->document()->isModified();
     setWindowTitle(app_name + " - " + file_part + (modified ? "*" : ""));
 }
 
@@ -223,7 +254,6 @@ void mainwindow::create_menu_and_toolbar() {
     auto *quit_act = new QAction(QIcon::fromTheme("application-exit"), "Quit", this);
     const QString app_name = QString::fromLatin1(appconfig::APP_NAME);
     auto *about_ktikz_act = new QAction(QIcon::fromTheme("help-about"), "About " + app_name, this);
-    auto *about_kde_act = new QAction(QIcon::fromTheme("help-about"), "About KDE", this);
 
     load_act->setIconVisibleInMenu(true);
     compile_act->setIconVisibleInMenu(true);
@@ -244,17 +274,13 @@ void mainwindow::create_menu_and_toolbar() {
     connect(save_act, &QAction::triggered, this, &mainwindow::save_file);
     connect(save_as_act, &QAction::triggered, this, &mainwindow::save_file_as);
     connect(undo_act, &QAction::triggered, this, [this]() {
-        if (editor_view_ && editor_view_->actionCollection()) {
-            if (QAction *a = editor_view_->actionCollection()->action(QStringLiteral("edit_undo"))) {
-                a->trigger();
-            }
+        if (editor_) {
+            editor_->undo();
         }
     });
     connect(redo_act, &QAction::triggered, this, [this]() {
-        if (editor_view_ && editor_view_->actionCollection()) {
-            if (QAction *a = editor_view_->actionCollection()->action(QStringLiteral("edit_redo"))) {
-                a->trigger();
-            }
+        if (editor_) {
+            editor_->redo();
         }
     });
     connect(indent_act, &QAction::triggered, this, &mainwindow::indent_latex);
@@ -269,23 +295,14 @@ void mainwindow::create_menu_and_toolbar() {
             "A KDE/Qt editor for TikZ with live PDF preview and interactive shape editing.\n\n"
             "Francesco Betti Sorbelli <francesco.bettisorbelli@unipg.it>");
     });
-    connect(about_kde_act, &QAction::triggered, this, [this]() {
-        const QString app_name = QString::fromLatin1(appconfig::APP_NAME);
-        QMessageBox::about(
-            this,
-            "About KDE",
-            "KDE is an international free software community developing open technologies "
-            "and user-focused desktop applications.\n\n"
-            + app_name + " is built on Qt and KDE Frameworks.");
-    });
 
     auto add_example = [this, examples_menu](const QString &label, const QString &body) {
         auto *act = new QAction(label, this);
         connect(act, &QAction::triggered, this, [this, body, label]() {
-            if (!editor_doc_) {
+            if (!editor_) {
                 return;
             }
-            editor_doc_->setText(wrap_tikz_document(body));
+            editor_->setPlainText(wrap_tikz_document(body));
             statusBar()->showMessage("Loaded example: " + label, 1500);
             if (compile_service_ && !compile_service_->is_busy()) {
                 compile();
@@ -314,7 +331,7 @@ void mainwindow::create_menu_and_toolbar() {
         "  \\draw[orange,thick,fill=red,fill opacity=0.4] (2,-4) rectangle (6,-1);\n"
         "  \\draw[red,thick] (-4,4) .. controls (-6,6) and (-1,4) .. (-3,7)"
         "                   .. controls (-2,8.2) and (0.5,6.3) .. (1.2,7.1);\n"
-        "  \\node at (2,6) {KTikZ ... enjoy};\n");
+        "  \\node at (2,6) {" + app_name + " ... enjoy};\n");
 
     file_menu->addAction(new_act);
     file_menu->addAction(load_act);
@@ -327,7 +344,6 @@ void mainwindow::create_menu_and_toolbar() {
     build_menu->addAction(compile_act);
     build_menu->addAction(indent_act);
     help_menu->addAction(about_ktikz_act);
-    help_menu->addAction(about_kde_act);
 
     auto *toolbar = addToolBar("Main");
     toolbar->setMovable(false);
@@ -346,11 +362,11 @@ void mainwindow::create_menu_and_toolbar() {
 }
 
 void mainwindow::new_file() {
-    if (!editor_doc_) {
+    if (!editor_) {
         return;
     }
 
-    if (editor_doc_->isModified()) {
+    if (editor_->document()->isModified()) {
         const QMessageBox::StandardButton res = QMessageBox::question(
             this,
             "New file",
@@ -362,9 +378,9 @@ void mainwindow::new_file() {
         }
     }
 
-    editor_doc_->setText(QString());
+    editor_->setPlainText(QString());
     current_file_path_.clear();
-    editor_doc_->setModified(false);
+    editor_->document()->setModified(false);
     update_window_title();
     statusBar()->showMessage("New file", 1500);
 }
@@ -386,15 +402,15 @@ void mainwindow::load_file() {
     }
 
     QTextStream in(&file);
-    editor_doc_->setText(in.readAll());
-    editor_doc_->setModified(false);
+    editor_->setPlainText(in.readAll());
+    editor_->document()->setModified(false);
     current_file_path_ = path;
     update_window_title();
     statusBar()->showMessage("Loaded " + QFileInfo(path).fileName(), 3000);
 }
 
 void mainwindow::save_file() {
-    if (!editor_doc_) {
+    if (!editor_) {
         return;
     }
 
@@ -411,17 +427,17 @@ void mainwindow::save_file() {
     }
 
     QTextStream out(&file);
-    out << editor_doc_->text();
+    out << editor_->toPlainText();
     file.close();
 
     current_file_path_ = path;
-    editor_doc_->setModified(false);
+    editor_->document()->setModified(false);
     update_window_title();
     statusBar()->showMessage("Saved " + QFileInfo(path).fileName(), 3000);
 }
 
 void mainwindow::save_file_as() {
-    if (!editor_doc_) {
+    if (!editor_) {
         return;
     }
 
@@ -441,25 +457,25 @@ void mainwindow::save_file_as() {
     }
 
     QTextStream out(&file);
-    out << editor_doc_->text();
+    out << editor_->toPlainText();
     file.close();
 
     current_file_path_ = path;
-    editor_doc_->setModified(false);
+    editor_->document()->setModified(false);
     update_window_title();
     statusBar()->showMessage("Saved " + QFileInfo(path).fileName(), 3000);
 }
 
-void mainwindow::on_document_modified_changed(KTextEditor::Document *) {
+void mainwindow::on_document_modified_changed(bool) {
     update_window_title();
 }
 
 void mainwindow::compile() {
-    if (!editor_doc_ || !compile_service_) {
+    if (!editor_ || !compile_service_) {
         return;
     }
 
-    const QString source_text = editor_doc_->text();
+    const QString source_text = editor_->toPlainText();
     coordinate_refs_ = coordinateparser::extract_refs(source_text);
     circle_refs_ = coordinateparser::extract_circle_refs(source_text);
     ellipse_refs_ = coordinateparser::extract_ellipse_refs(source_text);
@@ -475,11 +491,11 @@ void mainwindow::compile() {
 }
 
 void mainwindow::indent_latex() {
-    if (!editor_doc_) {
+    if (!editor_) {
         return;
     }
 
-    const QString text = editor_doc_->text();
+    const QString text = editor_->toPlainText();
     const QStringList lines = text.split('\n', Qt::KeepEmptyParts);
 
     auto count_occurrences = [](const QString &line, const QString &token) {
@@ -516,7 +532,7 @@ void mainwindow::indent_latex() {
         indent_level = qMax(0, indent_level + begins - ends);
     }
 
-    editor_doc_->setText(out_lines.join('\n'));
+    editor_->setPlainText(out_lines.join('\n'));
     statusBar()->showMessage("LaTeX indentation applied", 1500);
 }
 
@@ -543,7 +559,7 @@ void mainwindow::on_compile_finished(bool success, const QString &pdf_path, cons
 }
 
 void mainwindow::on_coordinate_dragged(int index, double x, double y) {
-    if (!editor_doc_ || !compile_service_) {
+    if (!editor_ || !compile_service_) {
         return;
     }
     if (compile_service_->is_busy()) {
@@ -554,19 +570,19 @@ void mainwindow::on_coordinate_dragged(int index, double x, double y) {
     }
 
     const coord_ref ref = coordinate_refs_[index];
-    QString text = editor_doc_->text();
+    QString text = editor_->toPlainText();
     if (ref.end <= ref.start || ref.end > text.size()) {
         return;
     }
 
     const QString replacement = "(" + coordinateparser::format_number(x) + "," + coordinateparser::format_number(y) + ")";
     text.replace(ref.start, ref.end - ref.start, replacement);
-    editor_doc_->setText(text);
+    editor_->setPlainText(text);
     compile();
 }
 
 void mainwindow::on_circle_radius_dragged(int index, double radius) {
-    if (!editor_doc_ || !compile_service_) {
+    if (!editor_ || !compile_service_) {
         return;
     }
     if (compile_service_->is_busy()) {
@@ -577,19 +593,19 @@ void mainwindow::on_circle_radius_dragged(int index, double radius) {
     }
 
     const circle_ref ref = circle_refs_[index];
-    QString text = editor_doc_->text();
+    QString text = editor_->toPlainText();
     if (ref.radius_end <= ref.radius_start || ref.radius_end > text.size()) {
         return;
     }
 
     const QString replacement = coordinateparser::format_number(radius);
     text.replace(ref.radius_start, ref.radius_end - ref.radius_start, replacement);
-    editor_doc_->setText(text);
+    editor_->setPlainText(text);
     compile();
 }
 
 void mainwindow::on_ellipse_radii_dragged(int index, double rx, double ry) {
-    if (!editor_doc_ || !compile_service_) {
+    if (!editor_ || !compile_service_) {
         return;
     }
     if (compile_service_->is_busy()) {
@@ -600,7 +616,7 @@ void mainwindow::on_ellipse_radii_dragged(int index, double rx, double ry) {
     }
 
     const ellipse_ref ref = ellipse_refs_[index];
-    QString text = editor_doc_->text();
+    QString text = editor_->toPlainText();
     if (ref.rx_end <= ref.rx_start || ref.ry_end <= ref.ry_start) {
         return;
     }
@@ -620,12 +636,12 @@ void mainwindow::on_ellipse_radii_dragged(int index, double rx, double ry) {
         text.replace(ref.rx_start, ref.rx_end - ref.rx_start, rx_str);
     }
 
-    editor_doc_->setText(text);
+    editor_->setPlainText(text);
     compile();
 }
 
 void mainwindow::on_bezier_control_dragged(int index, int control_idx, double x, double y) {
-    if (!editor_doc_ || !compile_service_) {
+    if (!editor_ || !compile_service_) {
         return;
     }
     if (compile_service_->is_busy()) {
@@ -636,7 +652,7 @@ void mainwindow::on_bezier_control_dragged(int index, int control_idx, double x,
     }
 
     const bezier_ref ref = bezier_refs_[index];
-    QString text = editor_doc_->text();
+    QString text = editor_->toPlainText();
     int x_start = 0;
     int x_end = 0;
     int y_start = 0;
@@ -667,12 +683,12 @@ void mainwindow::on_bezier_control_dragged(int index, int control_idx, double x,
         text.replace(y_start, y_end - y_start, y_str);
         text.replace(x_start, x_end - x_start, x_str);
     }
-    editor_doc_->setText(text);
+    editor_->setPlainText(text);
     compile();
 }
 
 void mainwindow::on_rectangle_corner_dragged(int index, double x2, double y2) {
-    if (!editor_doc_ || !compile_service_) {
+    if (!editor_ || !compile_service_) {
         return;
     }
     if (compile_service_->is_busy()) {
@@ -683,7 +699,7 @@ void mainwindow::on_rectangle_corner_dragged(int index, double x2, double y2) {
     }
 
     const rectangle_ref ref = rectangle_refs_[index];
-    QString text = editor_doc_->text();
+    QString text = editor_->toPlainText();
     if (ref.x2_end <= ref.x2_start || ref.y2_end <= ref.y2_start) {
         return;
     }
@@ -703,7 +719,7 @@ void mainwindow::on_rectangle_corner_dragged(int index, double x2, double y2) {
         text.replace(ref.x2_start, ref.x2_end - ref.x2_start, x2_str);
     }
 
-    editor_doc_->setText(text);
+    editor_->setPlainText(text);
     compile();
 }
 

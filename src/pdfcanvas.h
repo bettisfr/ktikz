@@ -40,7 +40,7 @@ protected:
 
 private:
     static bool is_near_color(int r, int g, int b, int tr, int tg, int tb, int max_dist_sq);
-    static bool find_color_centroid(const QImage &img, char target, QPointF &centroid_out);
+    static std::vector<QPointF> find_color_centroids(const QImage &img, char target);
 
     void update_calibration(const QRect &target_rect);
     QPointF world_to_screen(double x, double y) const;

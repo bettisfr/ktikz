@@ -1,10 +1,10 @@
-# KTikZ
+# QTikZ
 
-KTikZ is a KDE/Qt desktop editor for TikZ with live PDF preview and direct manipulation of geometric parameters.
+QTikZ is a Qt desktop editor for TikZ with live PDF preview and direct manipulation of geometric parameters.
 
 ## Overview
 
-- Left pane: LaTeX/TikZ editor powered by `KTextEditor`
+- Left pane: LaTeX/TikZ editor powered by `QPlainTextEdit`
 - Right pane: compiled PDF preview rendered with `QPdfDocument`
 - Bottom pane: compilation log output
 - Startup: empty editor and maximized window
@@ -60,8 +60,7 @@ The `Examples` menu includes ready-made snippets for:
 
 ## Help Menu
 
-- `About KTikZ`
-- `About KDE`
+- `About QTikZ`
 
 ## Build
 
@@ -70,10 +69,15 @@ cmake -S . -B build
 cmake --build build -j
 ```
 
+Platform-specific guides:
+
+- Windows: `BUILD_WINDOWS.md`
+- macOS: `BUILD_MACOS.md`
+
 ## Run
 
 ```bash
-./build/ktikz
+./build/qtikz
 ```
 
 ## Project Structure

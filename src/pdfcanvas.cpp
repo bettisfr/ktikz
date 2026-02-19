@@ -7,6 +7,7 @@
 #include <QWheelEvent>
 
 #include <cmath>
+#include <queue>
 
 pdfcanvas::pdfcanvas(QWidget *parent) : QWidget(parent) {
     setFocusPolicy(Qt::StrongFocus);
@@ -376,9 +377,10 @@ bool pdfcanvas::is_near_color(int r, int g, int b, int tr, int tg, int tb, int m
     return (dr * dr + dg * dg + db * db) <= max_dist_sq;
 }
 
-bool pdfcanvas::find_color_centroid(const QImage &img, char target, QPointF &centroid_out) {
+std::vector<QPointF> pdfcanvas::find_color_centroids(const QImage &img, char target) {
+    std::vector<QPointF> out;
     if (img.isNull()) {
-        return false;
+        return out;
     }
 
     int tr = 0;
@@ -393,9 +395,10 @@ bool pdfcanvas::find_color_centroid(const QImage &img, char target, QPointF &cen
     }
 
     const int max_dist_sq = 30 * 30;
-    double sx = 0.0;
-    double sy = 0.0;
-    int count = 0;
+    const int w = img.width();
+    const int h = img.height();
+    std::vector<unsigned char> mask(static_cast<size_t>(w) * static_cast<size_t>(h), 0);
+    std::vector<unsigned char> visited(static_cast<size_t>(w) * static_cast<size_t>(h), 0);
 
     for (int y = 0; y < img.height(); ++y) {
         const QRgb *row = reinterpret_cast<const QRgb *>(img.constScanLine(y));
@@ -404,19 +407,59 @@ bool pdfcanvas::find_color_centroid(const QImage &img, char target, QPointF &cen
             const int g = qGreen(row[x]);
             const int b = qBlue(row[x]);
             if (is_near_color(r, g, b, tr, tg, tb, max_dist_sq)) {
-                sx += static_cast<double>(x);
-                sy += static_cast<double>(y);
-                ++count;
+                mask[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)] = 1;
             }
         }
     }
 
-    if (count < 1) {
-        return false;
+    static const int dx[8] = {-1, 0, 1, -1, 1, -1, 0, 1};
+    static const int dy[8] = {-1, -1, -1, 0, 0, 1, 1, 1};
+    constexpr int min_component_pixels = 1;
+
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            const size_t idx = static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x);
+            if (!mask[idx] || visited[idx]) {
+                continue;
+            }
+
+            std::queue<QPoint> q;
+            q.push(QPoint(x, y));
+            visited[idx] = 1;
+
+            double sx = 0.0;
+            double sy = 0.0;
+            int count = 0;
+
+            while (!q.empty()) {
+                const QPoint p = q.front();
+                q.pop();
+                sx += static_cast<double>(p.x());
+                sy += static_cast<double>(p.y());
+                ++count;
+
+                for (int k = 0; k < 8; ++k) {
+                    const int nx = p.x() + dx[k];
+                    const int ny = p.y() + dy[k];
+                    if (nx < 0 || ny < 0 || nx >= w || ny >= h) {
+                        continue;
+                    }
+                    const size_t nidx = static_cast<size_t>(ny) * static_cast<size_t>(w) + static_cast<size_t>(nx);
+                    if (!mask[nidx] || visited[nidx]) {
+                        continue;
+                    }
+                    visited[nidx] = 1;
+                    q.push(QPoint(nx, ny));
+                }
+            }
+
+            if (count >= min_component_pixels) {
+                out.push_back(QPointF(sx / count, sy / count));
+            }
+        }
     }
 
-    centroid_out = QPointF(sx / count, sy / count);
-    return true;
+    return out;
 }
 
 void pdfcanvas::update_calibration(const QRect &target_rect) {
@@ -425,13 +468,54 @@ void pdfcanvas::update_calibration(const QRect &target_rect) {
         return;
     }
 
+    const std::vector<QPointF> r_candidates = find_color_centroids(rendered_image_, 'r');
+    const std::vector<QPointF> g_candidates = find_color_centroids(rendered_image_, 'g');
+    const std::vector<QPointF> b_candidates = find_color_centroids(rendered_image_, 'b');
+    if (r_candidates.empty() || g_candidates.empty() || b_candidates.empty()) {
+        return;
+    }
+
     QPointF red_local;
     QPointF green_local;
     QPointF blue_local;
-    const bool ok_r = find_color_centroid(rendered_image_, 'r', red_local);
-    const bool ok_g = find_color_centroid(rendered_image_, 'g', green_local);
-    const bool ok_b = find_color_centroid(rendered_image_, 'b', blue_local);
-    if (!ok_r || !ok_g || !ok_b) {
+    double best_score = 1e18;
+    bool found = false;
+
+    // Choose the RGB triple that best matches the expected local basis:
+    // vectors (R->G) and (R->B) should be close to orthogonal and similar length.
+    for (const QPointF &r : r_candidates) {
+        for (const QPointF &g : g_candidates) {
+            const QPointF u = g - r;
+            const double lu = std::hypot(u.x(), u.y());
+            if (lu < 2.0) {
+                continue;
+            }
+            for (const QPointF &b : b_candidates) {
+                const QPointF v = b - r;
+                const double lv = std::hypot(v.x(), v.y());
+                if (lv < 2.0) {
+                    continue;
+                }
+                const double det = u.x() * v.y() - u.y() * v.x();
+                if (std::abs(det) < 1e-6) {
+                    continue;
+                }
+                const double dot = u.x() * v.x() + u.y() * v.y();
+                const double ortho = std::abs(dot) / (lu * lv); // 0 is best
+                const double len_balance = std::abs(lu - lv) / qMax(lu, lv); // 0 is best
+                const double score = ortho * 2.0 + len_balance;
+                if (score < best_score) {
+                    best_score = score;
+                    red_local = r;
+                    green_local = g;
+                    blue_local = b;
+                    found = true;
+                }
+            }
+        }
+    }
+
+    if (!found) {
         return;
     }
 

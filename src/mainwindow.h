@@ -1,24 +1,21 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
-#include <KMainWindow>
+#include <QMainWindow>
 #include <vector>
 
 #include "model.h"
 
+class QCloseEvent;
 class QComboBox;
+class QPlainTextEdit;
 class QSpinBox;
 class QTextEdit;
-
-namespace KTextEditor {
-class Document;
-class View;
-}
 
 class compileservice;
 class pdfcanvas;
 
-class mainwindow : public KMainWindow {
+class mainwindow : public QMainWindow {
     Q_OBJECT
 
 public:
@@ -43,14 +40,13 @@ private slots:
     void on_rectangle_corner_dragged(int index, double x2, double y2);
     void on_grid_step_changed(int value);
     void on_grid_extent_changed(int value);
-    void on_document_modified_changed(KTextEditor::Document *document);
+    void on_document_modified_changed(bool modified);
 
 private:
     void create_menu_and_toolbar();
     void update_window_title();
 
-    KTextEditor::Document *editor_doc_ = nullptr;
-    KTextEditor::View *editor_view_ = nullptr;
+    QPlainTextEdit *editor_ = nullptr;
     pdfcanvas *preview_canvas_ = nullptr;
     QTextEdit *output_ = nullptr;
     QComboBox *grid_step_combo_ = nullptr;
