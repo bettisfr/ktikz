@@ -13,7 +13,7 @@ include(KDEInstallDirs)
 include(KDECMakeSettings)
 include(KDECompilerSettings NO_POLICY_SCOPE)
 
-find_package(Qt6 6.4 REQUIRED COMPONENTS Core Widgets)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Widgets Pdf)
 find_package(KF6 REQUIRED COMPONENTS TextEditor XmlGui)
 
 add_executable(ktikz
@@ -23,6 +23,7 @@ add_executable(ktikz
 target_link_libraries(ktikz PRIVATE
     Qt6::Core
     Qt6::Widgets
+    Qt6::Pdf
     KF6::TextEditor
     KF6::XmlGui
 )
