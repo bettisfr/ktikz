@@ -47,7 +47,18 @@ mainwindow::mainwindow(QWidget *parent) : KMainWindow(parent) {
     editor_font.setPointSize(12);
     editor_view_->setConfigValue(QStringLiteral("font"), editor_font);
 
-    editor_doc_->setText(QString());
+    editor_doc_->setText(
+        "\\documentclass[tikz,border=10pt]{standalone}\n"
+        "\\usepackage{tikz}\n"
+        "\\begin{document}\n"
+        "\\begin{tikzpicture}\n"
+        "  \\draw (0,0) -- (2,0);\n"
+        "  \\draw[blue,dashed,thick,->] (0,0) -- (1,1) -- (2,0.5) -- (3,1.4);\n"
+        "  \\draw (1.2,-0.7) circle (0.5);\n"
+        "  \\draw (2.2,-0.9) rectangle (3.4,0.1);\n"
+        "  \\node at (1.8,1.8) {Demo label};\n"
+        "\\end{tikzpicture}\n"
+        "\\end{document}\n");
 
     preview_canvas_ = new pdfcanvas(this);
 
