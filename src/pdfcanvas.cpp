@@ -389,10 +389,10 @@ bool pdfcanvas::find_color_centroid(const QImage &img, char target, QPointF &cen
     } else if (target == 'g') {
         tr = 19; tg = 251; tb = 233;
     } else if (target == 'b') {
-        tr = 241; tg = 251; tb = 17;
+        tr = 13; tg = 97; tb = 255;
     }
 
-    const int max_dist_sq = 55 * 55;
+    const int max_dist_sq = 30 * 30;
     double sx = 0.0;
     double sy = 0.0;
     int count = 0;

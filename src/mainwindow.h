@@ -24,6 +24,9 @@ class mainwindow : public KMainWindow {
 public:
     explicit mainwindow(QWidget *parent = nullptr);
 
+protected:
+    void closeEvent(QCloseEvent *event) override;
+
 private slots:
     void load_file();
     void compile();

@@ -68,7 +68,7 @@ QString compileservice::inject_grid(const QString &source, int grid_step_mm, int
     marker_block += "\n  % ktikz calibration markers (top layer)\n";
     marker_block += "  \\fill[draw=none,fill={rgb,255:red,253;green,17;blue,251}] (0,0) circle[radius=1.2pt];\n";
     marker_block += "  \\fill[draw=none,fill={rgb,255:red,19;green,251;blue,233}] (1,0) circle[radius=1.2pt];\n";
-    marker_block += "  \\fill[draw=none,fill={rgb,255:red,241;green,251;blue,17}] (0,1) circle[radius=1.2pt];\n";
+    marker_block += "  \\fill[draw=none,fill={rgb,255:red,13;green,97;blue,255}] (0,1) circle[radius=1.2pt];\n";
 
     QString out = source;
     out.insert(begin_match.capturedEnd(0), grid_block);

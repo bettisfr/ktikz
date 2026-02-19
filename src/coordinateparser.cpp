@@ -24,7 +24,7 @@ const QRegularExpression &ellipse_pattern() {
 
 const QRegularExpression &bezier_pattern() {
     static const QRegularExpression pattern(
-        R"(\(\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*,\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*\)\s*\.\.\s*controls\s*\(\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*,\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*\)\s*and\s*\(\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*,\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*\)\s*\.\.\s*\(\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*,\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*\))");
+        R"((?:\(\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*,\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*\)\s*)?\.\.\s*controls\s*\(\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*,\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*\)\s*and\s*\(\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*,\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*\)\s*\.\.\s*\(\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*,\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*\))");
     return pattern;
 }
 
@@ -151,6 +151,10 @@ std::vector<ellipse_pair> extract_ellipse_pairs(const QString &source) {
 std::vector<bezier_ref> extract_bezier_refs(const QString &source) {
     std::vector<bezier_ref> refs;
     QRegularExpressionMatchIterator it = bezier_pattern().globalMatch(source);
+    bool have_prev_end = false;
+    double prev_x3 = 0.0;
+    double prev_y3 = 0.0;
+    int last_seg_end = 0;
     while (it.hasNext()) {
         const QRegularExpressionMatch m = it.next();
         bool ok_x0 = false;
@@ -161,8 +165,27 @@ std::vector<bezier_ref> extract_bezier_refs(const QString &source) {
         bool ok_y2 = false;
         bool ok_x3 = false;
         bool ok_y3 = false;
-        const double x0 = m.captured(1).toDouble(&ok_x0);
-        const double y0 = m.captured(2).toDouble(&ok_y0);
+        const int seg_start = m.capturedStart(0);
+        if (seg_start > last_seg_end) {
+            const QString between = source.mid(last_seg_end, seg_start - last_seg_end);
+            if (between.contains(';')) {
+                have_prev_end = false;
+            }
+        }
+
+        const bool has_explicit_start = m.capturedStart(1) >= 0 && m.capturedStart(2) >= 0;
+        double x0 = 0.0;
+        double y0 = 0.0;
+        if (has_explicit_start) {
+            x0 = m.captured(1).toDouble(&ok_x0);
+            y0 = m.captured(2).toDouble(&ok_y0);
+        } else if (have_prev_end) {
+            ok_x0 = true;
+            ok_y0 = true;
+            x0 = prev_x3;
+            y0 = prev_y3;
+        }
+
         const double x1 = m.captured(3).toDouble(&ok_x1);
         const double y1 = m.captured(4).toDouble(&ok_y1);
         const double x2 = m.captured(5).toDouble(&ok_x2);
@@ -170,6 +193,7 @@ std::vector<bezier_ref> extract_bezier_refs(const QString &source) {
         const double x3 = m.captured(7).toDouble(&ok_x3);
         const double y3 = m.captured(8).toDouble(&ok_y3);
         if (!ok_x0 || !ok_y0 || !ok_x1 || !ok_y1 || !ok_x2 || !ok_y2 || !ok_x3 || !ok_y3) {
+            last_seg_end = m.capturedEnd(0);
             continue;
         }
 
@@ -191,6 +215,11 @@ std::vector<bezier_ref> extract_bezier_refs(const QString &source) {
         ref.x3 = x3;
         ref.y3 = y3;
         refs.push_back(ref);
+
+        have_prev_end = true;
+        prev_x3 = x3;
+        prev_y3 = y3;
+        last_seg_end = m.capturedEnd(0);
     }
     return refs;
 }

@@ -6,6 +6,7 @@
 
 #include <QAction>
 #include <QComboBox>
+#include <QCloseEvent>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -15,6 +16,7 @@
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
+#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QSplitter>
 #include <QSpinBox>
@@ -27,6 +29,7 @@
 #include "compileservice.h"
 #include "coordinateparser.h"
 #include "pdfcanvas.h"
+#include "appconfig.h"
 
 namespace {
 QString wrap_tikz_document(const QString &tikz_body) {
@@ -40,7 +43,8 @@ QString wrap_tikz_document(const QString &tikz_body) {
 } // namespace
 
 mainwindow::mainwindow(QWidget *parent) : KMainWindow(parent) {
-    setWindowTitle("KTikZ");
+    const QString app_name = QString::fromLatin1(appconfig::APP_NAME);
+    setWindowTitle(app_name);
     resize(1200, 800);
 
     auto *editor_backend = KTextEditor::Editor::instance();
@@ -59,8 +63,7 @@ mainwindow::mainwindow(QWidget *parent) : KMainWindow(parent) {
     editor_font.setPointSize(12);
     editor_view_->setConfigValue(QStringLiteral("font"), editor_font);
 
-    editor_doc_->setText(wrap_tikz_document(
-        "  \\draw[blue,thick] (0,0) .. controls (1.5,2.0) and (3.0,-1.0) .. (4.0,1.0);\n"));
+    editor_doc_->setText(QString());
 
     preview_canvas_ = new pdfcanvas(this);
 
@@ -137,14 +140,33 @@ mainwindow::mainwindow(QWidget *parent) : KMainWindow(parent) {
     statusBar()->showMessage("Ready");
 }
 
+void mainwindow::closeEvent(QCloseEvent *event) {
+    const QString app_name = QString::fromLatin1(appconfig::APP_NAME);
+    const QMessageBox::StandardButton res = QMessageBox::question(
+        this,
+        "Quit " + app_name,
+        "Do you want to quit " + app_name + "?",
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No);
+    if (res == QMessageBox::Yes) {
+        event->accept();
+    } else {
+        event->ignore();
+    }
+}
+
 void mainwindow::create_menu_and_toolbar() {
     auto *file_menu = menuBar()->addMenu("File");
     auto *build_menu = menuBar()->addMenu("Build");
     auto *examples_menu = menuBar()->addMenu("Examples");
+    auto *help_menu = menuBar()->addMenu("Help");
 
     auto *load_act = new QAction(QIcon::fromTheme("document-open"), "Load", this);
     auto *compile_act = new QAction(QIcon::fromTheme("system-run"), "Compile", this);
     auto *quit_act = new QAction(QIcon::fromTheme("application-exit"), "Quit", this);
+    const QString app_name = QString::fromLatin1(appconfig::APP_NAME);
+    auto *about_ktikz_act = new QAction(QIcon::fromTheme("help-about"), "About " + app_name, this);
+    auto *about_kde_act = new QAction(QIcon::fromTheme("help-about"), "About KDE", this);
 
     load_act->setIconVisibleInMenu(true);
     compile_act->setIconVisibleInMenu(true);
@@ -157,6 +179,23 @@ void mainwindow::create_menu_and_toolbar() {
     connect(load_act, &QAction::triggered, this, &mainwindow::load_file);
     connect(compile_act, &QAction::triggered, this, &mainwindow::compile);
     connect(quit_act, &QAction::triggered, this, &QWidget::close);
+    connect(about_ktikz_act, &QAction::triggered, this, [this]() {
+        const QString app_name = QString::fromLatin1(appconfig::APP_NAME);
+        QMessageBox::about(
+            this,
+            "About " + app_name,
+            app_name + "\n\n"
+            "A KDE/Qt editor for TikZ with live PDF preview and interactive shape editing.");
+    });
+    connect(about_kde_act, &QAction::triggered, this, [this]() {
+        const QString app_name = QString::fromLatin1(appconfig::APP_NAME);
+        QMessageBox::about(
+            this,
+            "About KDE",
+            "KDE is an international free software community developing open technologies "
+            "and user-focused desktop applications.\n\n"
+            + app_name + " is built on Qt and KDE Frameworks.");
+    });
 
     auto add_example = [this, examples_menu](const QString &label, const QString &body) {
         auto *act = new QAction(label, this);
@@ -181,19 +220,22 @@ void mainwindow::create_menu_and_toolbar() {
     add_example("Bezier", "  \\draw[blue,thick] (0,0) .. controls (1.5,2.0) and (3.0,-1.0) .. (4.0,1.0);\n");
     add_example(
         "Mixed Playground",
-        "  \\draw[->,thick] (-1.5,0) -- (10.5,0);\n"
-        "  \\draw[->,thick] (0,-1.5) -- (0,6.0);\n"
-        "  \\draw[blue,dashed,thick,->] (0.5,0.4) -- (2.0,2.2) -- (4.2,0.9) -- (6.8,2.8);\n"
-        "  \\draw[thick] (2.4,1.1) circle (0.9);\n"
-        "  \\draw[thick] (6.6,2.7) ellipse (1.8 and 0.8);\n"
-        "  \\draw[thick] (7.4,-0.8) rectangle (9.8,1.4);\n"
-        "  \\draw[red,thick] (1.0,4.2) .. controls (3.2,5.4) and (5.9,2.2) .. (8.8,4.8);\n"
-        "  \\node at (9.3,5.4) {KTikZ};\n");
+        "  \\draw[->,thick] (-9,0) -- (9,0);\n"
+        "  \\draw[->,thick] (0,-9) -- (0,9);\n"
+        "  \\draw[blue,dashed,thick,->] (1,1) -- (2,3) -- (4,1) -- (6,3);\n"
+        "  \\draw[brown, thick] (-4,-3) circle (2);\n"
+        "  \\draw[magenta, ultra thick, fill=green!20] (6,5) ellipse (2 and 1);\n"
+        "  \\draw[orange,thick,fill=red,fill opacity=0.4] (2,-4) rectangle (6,-1);\n"
+        "  \\draw[red,thick] (-4,4) .. controls (-6,6) and (-1,4) .. (-3,7)"
+        "                   .. controls (-2,8.2) and (0.5,6.3) .. (1.2,7.1);\n"
+        "  \\node at (2,6) {KTikZ};\n");
 
     file_menu->addAction(load_act);
     file_menu->addSeparator();
     file_menu->addAction(quit_act);
     build_menu->addAction(compile_act);
+    help_menu->addAction(about_ktikz_act);
+    help_menu->addAction(about_kde_act);
 
     auto *toolbar = addToolBar("Main");
     toolbar->setMovable(false);
