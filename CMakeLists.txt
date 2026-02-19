@@ -18,6 +18,15 @@ find_package(KF6 REQUIRED COMPONENTS TextEditor XmlGui)
 
 add_executable(ktikz
     src/main.cpp
+    src/mainwindow.cpp
+    src/mainwindow.h
+    src/pdfcanvas.cpp
+    src/pdfcanvas.h
+    src/compileservice.cpp
+    src/compileservice.h
+    src/coordinateparser.cpp
+    src/coordinateparser.h
+    src/model.h
 )
 
 target_link_libraries(ktikz PRIVATE
