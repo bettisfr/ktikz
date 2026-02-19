@@ -14,7 +14,10 @@ public:
     explicit compileservice(QObject *parent = nullptr);
 
     bool is_busy() const;
+    void cancel();
     void compile(const QString &source_text, int grid_step_mm, int grid_extent_cm);
+    void set_compiler_command(const QString &command);
+    QString compiler_command() const;
 
 signals:
     void output_text(const QString &text);
@@ -32,6 +35,8 @@ private:
     QProcess proc_;
     QString work_dir_path_;
     std::unique_ptr<QTemporaryDir> temp_dir_;
+    bool canceled_ = false;
+    QString compiler_command_ = QStringLiteral("pdflatex");
 };
 
 #endif

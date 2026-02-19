@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 
 #include <QAction>
+#include <QApplication>
 #include <QComboBox>
 #include <QCloseEvent>
 #include <QFile>
@@ -13,28 +14,151 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QPainter>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSplitter>
 #include <QSpinBox>
 #include <QStatusBar>
+#include <QStyle>
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QTextEdit>
 #include <QTextCharFormat>
 #include <QSyntaxHighlighter>
+#include <QTimer>
 #include <QRegularExpression>
+#include <QSignalBlocker>
+#include <QSettings>
 #include <QTextStream>
 #include <QToolBar>
 #include <QVBoxLayout>
 #include <QWidget>
+#include <QStyleFactory>
 
 #include "compileservice.h"
 #include "coordinateparser.h"
 #include "pdfcanvas.h"
 #include "appconfig.h"
+#include "settingsdialog.h"
 
 namespace {
+class linenumberedit;
+
+class linenumberarea : public QWidget {
+public:
+    explicit linenumberarea(QWidget *parent, linenumberedit *editor) : QWidget(parent), editor_(editor) {}
+    QSize sizeHint() const override;
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
+
+private:
+    linenumberedit *editor_;
+};
+
+class linenumberedit : public QPlainTextEdit {
+public:
+    explicit linenumberedit(QWidget *parent = nullptr) : QPlainTextEdit(parent) {
+        line_number_area_ = new linenumberarea(this, this);
+        connect(this, &QPlainTextEdit::blockCountChanged, this, &linenumberedit::update_line_number_area_width);
+        connect(this, &QPlainTextEdit::updateRequest, this, &linenumberedit::update_line_number_area);
+        connect(this, &QPlainTextEdit::cursorPositionChanged, this, [this]() { line_number_area_->update(); });
+        update_line_number_area_width(0);
+    }
+
+    int line_number_area_width() const {
+        if (!show_line_numbers_) {
+            return 0;
+        }
+        int digits = 1;
+        int max = qMax(1, blockCount());
+        while (max >= 10) {
+            max /= 10;
+            ++digits;
+        }
+        return 8 + fontMetrics().horizontalAdvance(QLatin1Char('9')) * digits;
+    }
+
+    void line_number_area_paint_event(QPaintEvent *event) {
+        if (!show_line_numbers_) {
+            return;
+        }
+        QPainter painter(line_number_area_);
+        painter.fillRect(event->rect(), palette().color(QPalette::AlternateBase));
+
+        QTextBlock block = firstVisibleBlock();
+        int block_number = block.blockNumber();
+        int top = static_cast<int>(blockBoundingGeometry(block).translated(contentOffset()).top());
+        int bottom = top + static_cast<int>(blockBoundingRect(block).height());
+
+        while (block.isValid() && top <= event->rect().bottom()) {
+            if (block.isVisible() && bottom >= event->rect().top()) {
+                const QString number = QString::number(block_number + 1);
+                const bool current = (textCursor().blockNumber() == block_number);
+                painter.setPen(current ? palette().color(QPalette::Text) : palette().color(QPalette::Mid));
+                painter.drawText(0,
+                                 top,
+                                 line_number_area_->width() - 4,
+                                 fontMetrics().height(),
+                                 Qt::AlignRight,
+                                 number);
+            }
+
+            block = block.next();
+            top = bottom;
+            bottom = top + static_cast<int>(blockBoundingRect(block).height());
+            ++block_number;
+        }
+    }
+
+    void set_line_numbers_visible(bool visible) {
+        show_line_numbers_ = visible;
+        line_number_area_->setVisible(show_line_numbers_);
+        update_line_number_area_width(0);
+        viewport()->update();
+    }
+
+    bool line_numbers_visible() const {
+        return show_line_numbers_;
+    }
+
+protected:
+    void resizeEvent(QResizeEvent *event) override {
+        QPlainTextEdit::resizeEvent(event);
+        const QRect cr = contentsRect();
+        line_number_area_->setGeometry(QRect(cr.left(), cr.top(), line_number_area_width(), cr.height()));
+    }
+
+private:
+    void update_line_number_area_width(int) {
+        setViewportMargins(line_number_area_width(), 0, 0, 0);
+    }
+
+    void update_line_number_area(const QRect &rect, int dy) {
+        if (dy) {
+            line_number_area_->scroll(0, dy);
+        } else {
+            line_number_area_->update(0, rect.y(), line_number_area_->width(), rect.height());
+        }
+
+        if (rect.contains(viewport()->rect())) {
+            update_line_number_area_width(0);
+        }
+    }
+
+    linenumberarea *line_number_area_ = nullptr;
+    bool show_line_numbers_ = true;
+};
+
+QSize linenumberarea::sizeHint() const {
+    return QSize(editor_->line_number_area_width(), 0);
+}
+
+void linenumberarea::paintEvent(QPaintEvent *event) {
+    editor_->line_number_area_paint_event(event);
+}
+
 class latexhighlighter : public QSyntaxHighlighter {
 public:
     explicit latexhighlighter(QTextDocument *doc) : QSyntaxHighlighter(doc) {
@@ -99,6 +223,20 @@ void append_colored_log(QTextEdit *output, const QString &text, const QColor &co
     output->setTextCursor(cursor);
     output->ensureCursorVisible();
 }
+
+QPalette make_dark_palette() {
+    QPalette palette;
+    palette.setColor(QPalette::Window, QColor(45, 45, 45));
+    palette.setColor(QPalette::WindowText, QColor(230, 230, 230));
+    palette.setColor(QPalette::Base, QColor(30, 30, 30));
+    palette.setColor(QPalette::AlternateBase, QColor(45, 45, 45));
+    palette.setColor(QPalette::Text, QColor(230, 230, 230));
+    palette.setColor(QPalette::Button, QColor(53, 53, 53));
+    palette.setColor(QPalette::ButtonText, QColor(230, 230, 230));
+    palette.setColor(QPalette::Highlight, QColor(42, 130, 218));
+    palette.setColor(QPalette::HighlightedText, QColor(255, 255, 255));
+    return palette;
+}
 } // namespace
 
 mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
@@ -106,15 +244,16 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
     resize(1200, 800);
 
     QFont editor_font;
-    editor_font.setFamily(QStringLiteral("Monospace"));
+    editor_font.setFamily(editor_font_family_);
     editor_font.setStyleHint(QFont::Monospace);
-    editor_font.setPointSize(12);
-    editor_ = new QPlainTextEdit(this);
+    editor_font.setPointSize(editor_font_size_);
+    editor_ = new linenumberedit(this);
     editor_->setFont(editor_font);
     editor_->setTabStopDistance(editor_->fontMetrics().horizontalAdvance(QStringLiteral(" ")) * 4);
     editor_->setPlainText(QString());
     editor_->document()->setModified(false);
     connect(editor_->document(), &QTextDocument::modificationChanged, this, &mainwindow::on_document_modified_changed);
+    connect(editor_, &QPlainTextEdit::textChanged, this, &mainwindow::on_editor_text_changed);
     new latexhighlighter(editor_->document());
     update_window_title();
 
@@ -124,12 +263,14 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
     splitter->addWidget(editor_);
 
     auto *right_pane = new QWidget(this);
+    right_pane->setObjectName("previewRightPane");
     auto *right_layout = new QVBoxLayout(right_pane);
     right_layout->setContentsMargins(0, 0, 0, 0);
     right_layout->setSpacing(6);
     right_layout->addWidget(preview_canvas_, 1);
 
     auto *controls_row = new QWidget(right_pane);
+    controls_row->setObjectName("previewControlsRow");
     auto *controls_layout = new QHBoxLayout(controls_row);
     controls_layout->setContentsMargins(6, 0, 6, 6);
     controls_layout->setSpacing(8);
@@ -196,6 +337,11 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
 
     compile_service_ = new compileservice(this);
 
+    auto_compile_timer_ = new QTimer(this);
+    auto_compile_timer_->setSingleShot(true);
+    auto_compile_timer_->setInterval(auto_compile_delay_ms_);
+    connect(auto_compile_timer_, &QTimer::timeout, this, &mainwindow::on_auto_compile_timeout);
+
     connect(preview_canvas_, &pdfcanvas::coordinate_dragged, this, &mainwindow::on_coordinate_dragged);
     connect(preview_canvas_, &pdfcanvas::circle_radius_dragged, this, &mainwindow::on_circle_radius_dragged);
     connect(preview_canvas_, &pdfcanvas::ellipse_radii_dragged, this, &mainwindow::on_ellipse_radii_dragged);
@@ -208,20 +354,14 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
     connect(compile_service_, &compileservice::compile_finished, this, &mainwindow::on_compile_finished);
 
     preview_canvas_->set_snap_mm(grid_snap_mm_);
+    load_settings();
 
     create_menu_and_toolbar();
     statusBar()->showMessage("Ready");
 }
 
 void mainwindow::closeEvent(QCloseEvent *event) {
-    const QString app_name = QString::fromLatin1(appconfig::APP_NAME);
-    const QMessageBox::StandardButton res = QMessageBox::question(
-        this,
-        "Quit " + app_name,
-        "Do you want to quit " + app_name + "?",
-        QMessageBox::Yes | QMessageBox::No,
-        QMessageBox::No);
-    if (res == QMessageBox::Yes) {
+    if (maybe_save_before_action("Quit", "Save changes before quitting?")) {
         event->accept();
     } else {
         event->ignore();
@@ -234,6 +374,77 @@ void mainwindow::update_window_title() {
         current_file_path_.isEmpty() ? QStringLiteral("untitled") : QFileInfo(current_file_path_).fileName();
     const bool modified = editor_ && editor_->document()->isModified();
     setWindowTitle(app_name + " - " + file_part + (modified ? "*" : ""));
+}
+
+bool mainwindow::maybe_save_before_action(const QString &title, const QString &text) {
+    if (!editor_ || !editor_->document()->isModified()) {
+        return true;
+    }
+
+    QMessageBox box(this);
+    box.setWindowTitle(title);
+    box.setText(text);
+    box.setIcon(QMessageBox::Warning);
+    QAbstractButton *save_btn = box.addButton("Save", QMessageBox::AcceptRole);
+    QAbstractButton *discard_btn = box.addButton("Discard", QMessageBox::DestructiveRole);
+    QAbstractButton *cancel_btn = box.addButton("Cancel", QMessageBox::RejectRole);
+    box.setDefaultButton(static_cast<QPushButton *>(save_btn));
+    box.exec();
+
+    if (box.clickedButton() == cancel_btn) {
+        return false;
+    }
+    if (box.clickedButton() == discard_btn) {
+        return true;
+    }
+    save_file();
+    return !editor_->document()->isModified();
+}
+
+void mainwindow::request_compile(bool cancel_running) {
+    if (!compile_service_ || !editor_) {
+        return;
+    }
+    if (compile_service_->is_busy()) {
+        pending_compile_ = true;
+        if (cancel_running) {
+            compile_service_->cancel();
+        }
+        return;
+    }
+
+    const QString source_text = editor_->toPlainText();
+    coordinate_refs_ = coordinateparser::extract_refs(source_text);
+    circle_refs_ = coordinateparser::extract_circle_refs(source_text);
+    ellipse_refs_ = coordinateparser::extract_ellipse_refs(source_text);
+    bezier_refs_ = coordinateparser::extract_bezier_refs(source_text);
+    rectangle_refs_ = coordinateparser::extract_rectangle_refs(source_text);
+    preview_canvas_->set_coordinates(coordinateparser::extract_pairs(source_text));
+    preview_canvas_->set_circles(coordinateparser::extract_circle_pairs(source_text));
+    preview_canvas_->set_ellipses(coordinateparser::extract_ellipse_pairs(source_text));
+    preview_canvas_->set_beziers(coordinateparser::extract_bezier_pairs(source_text));
+    preview_canvas_->set_rectangles(coordinateparser::extract_rectangle_pairs(source_text));
+    compile_service_->compile(source_text, grid_display_mm_, grid_extent_cm_);
+    statusBar()->showMessage("Compiling...");
+}
+
+void mainwindow::replace_editor_text_preserve_undo(const QString &text) {
+    suppress_auto_compile_ = true;
+    editor_->setPlainText(text);
+    suppress_auto_compile_ = false;
+}
+
+void mainwindow::on_editor_text_changed() {
+    if (suppress_auto_compile_) {
+        return;
+    }
+    if (auto_compile_timer_) {
+        auto_compile_timer_->start();
+    }
+}
+
+void mainwindow::on_auto_compile_timeout() {
+    request_compile(true);
 }
 
 void mainwindow::create_menu_and_toolbar() {
@@ -250,6 +461,7 @@ void mainwindow::create_menu_and_toolbar() {
     auto *undo_act = new QAction(QIcon::fromTheme("edit-undo"), "Undo", this);
     auto *redo_act = new QAction(QIcon::fromTheme("edit-redo"), "Redo", this);
     auto *indent_act = new QAction(QIcon::fromTheme("format-indent-more"), "Indent", this);
+    auto *settings_act = new QAction(QIcon::fromTheme("preferences-system"), "Settings...", this);
     auto *compile_act = new QAction(QIcon::fromTheme("system-run"), "Compile", this);
     auto *quit_act = new QAction(QIcon::fromTheme("application-exit"), "Quit", this);
     const QString app_name = QString::fromLatin1(appconfig::APP_NAME);
@@ -266,6 +478,7 @@ void mainwindow::create_menu_and_toolbar() {
     undo_act->setShortcut(QKeySequence::Undo);
     redo_act->setShortcut(QKeySequence::Redo);
     indent_act->setShortcut(QKeySequence("Ctrl+Shift+I"));
+    settings_act->setShortcut(QKeySequence("Ctrl+,"));
     compile_act->setShortcut(QKeySequence("F5"));
     quit_act->setShortcut(QKeySequence::Quit);
 
@@ -284,6 +497,7 @@ void mainwindow::create_menu_and_toolbar() {
         }
     });
     connect(indent_act, &QAction::triggered, this, &mainwindow::indent_latex);
+    connect(settings_act, &QAction::triggered, this, &mainwindow::open_settings);
     connect(compile_act, &QAction::triggered, this, &mainwindow::compile);
     connect(quit_act, &QAction::triggered, this, &QWidget::close);
     connect(about_ktikz_act, &QAction::triggered, this, [this]() {
@@ -292,7 +506,7 @@ void mainwindow::create_menu_and_toolbar() {
             this,
             "About " + app_name,
             app_name + "\n\n"
-            "A KDE/Qt editor for TikZ with live PDF preview and interactive shape editing.\n\n"
+            "A Qt editor for TikZ with live PDF preview and interactive shape editing.\n\n"
             "Francesco Betti Sorbelli <francesco.bettisorbelli@unipg.it>");
     });
 
@@ -302,7 +516,7 @@ void mainwindow::create_menu_and_toolbar() {
             if (!editor_) {
                 return;
             }
-            editor_->setPlainText(wrap_tikz_document(body));
+            replace_editor_text_preserve_undo(wrap_tikz_document(body));
             statusBar()->showMessage("Loaded example: " + label, 1500);
             if (compile_service_ && !compile_service_->is_busy()) {
                 compile();
@@ -341,6 +555,8 @@ void mainwindow::create_menu_and_toolbar() {
     file_menu->addAction(quit_act);
     edit_menu->addAction(undo_act);
     edit_menu->addAction(redo_act);
+    edit_menu->addSeparator();
+    edit_menu->addAction(settings_act);
     build_menu->addAction(compile_act);
     build_menu->addAction(indent_act);
     help_menu->addAction(about_ktikz_act);
@@ -361,24 +577,198 @@ void mainwindow::create_menu_and_toolbar() {
     toolbar->addAction(compile_act);
 }
 
+void mainwindow::apply_editor_font_size(int size) {
+    editor_font_size_ = qBound(8, size, 32);
+    if (!editor_) {
+        return;
+    }
+    QFont font = editor_->font();
+    font.setPointSize(editor_font_size_);
+    editor_->setFont(font);
+}
+
+void mainwindow::apply_editor_font_family(const QString &family) {
+    const QString normalized = family.trimmed();
+    if (!normalized.isEmpty()) {
+        editor_font_family_ = normalized;
+    }
+    if (!editor_) {
+        return;
+    }
+    QFont font = editor_->font();
+    font.setFamily(editor_font_family_);
+    font.setStyleHint(QFont::Monospace);
+    editor_->setFont(font);
+}
+
+void mainwindow::apply_line_number_visibility(bool visible) {
+    show_line_numbers_ = visible;
+    if (!editor_) {
+        return;
+    }
+    auto *line_editor = static_cast<linenumberedit *>(editor_);
+    line_editor->set_line_numbers_visible(show_line_numbers_);
+}
+
+void mainwindow::apply_theme(const QString &theme_id) {
+    const QString normalized = theme_id.trimmed().isEmpty() ? QStringLiteral("system") : theme_id.trimmed();
+    theme_id_ = normalized;
+
+    if (!qApp) {
+        return;
+    }
+    static const QString startup_style_name = qApp->style() ? qApp->style()->objectName() : QString();
+    static const QPalette startup_palette = qApp->palette();
+
+    if (theme_id_ == "dark") {
+        qApp->setStyle(QStyleFactory::create("Fusion"));
+        qApp->setPalette(make_dark_palette());
+        qApp->setStyleSheet(
+            "QMenuBar{background-color:#2d2d2d;color:#e6e6e6;}"
+            "QMenuBar::item:selected{background-color:#3a3a3a;}"
+            "QMenu{background-color:#2d2d2d;color:#e6e6e6;border:1px solid #3f3f3f;}"
+            "QMenu::item:selected{background-color:#3d6ea8;}"
+            "QToolBar{background-color:#2d2d2d;border-bottom:1px solid #3f3f3f;}"
+            "QStatusBar{background-color:#2d2d2d;color:#e6e6e6;}"
+            "QLabel{color:#e6e6e6;}"
+            "QWidget#previewRightPane{background-color:#2d2d2d;}"
+            "QWidget#previewControlsRow{background-color:#2d2d2d;}");
+        return;
+    }
+
+    if (theme_id_ == "light") {
+        if (!startup_style_name.isEmpty()) {
+            qApp->setStyle(QStyleFactory::create(startup_style_name));
+        }
+        qApp->setPalette(startup_palette);
+        qApp->setStyleSheet(QString());
+        return;
+    }
+
+    if (!startup_style_name.isEmpty()) {
+        qApp->setStyle(QStyleFactory::create(startup_style_name));
+    }
+    qApp->setPalette(startup_palette);
+    qApp->setStyleSheet(QString());
+}
+
+void mainwindow::load_settings() {
+    QSettings settings;
+    const QString saved_font_family = settings.value("ui/editor_font_family", editor_font_family_).toString();
+    const int saved_font_size = settings.value("ui/editor_font_size", editor_font_size_).toInt();
+    const bool saved_line_numbers = settings.value("ui/show_line_numbers", show_line_numbers_).toBool();
+    const QString saved_theme = settings.value("ui/theme", theme_id_).toString();
+    const int saved_delay_ms = settings.value("build/auto_compile_delay_ms", auto_compile_delay_ms_).toInt();
+    const QString saved_compiler = settings.value("build/compiler_command", compiler_command_).toString();
+    const int saved_step_mm = settings.value("grid/step_mm", grid_snap_mm_).toInt();
+    const int saved_extent_cm = settings.value("grid/extent_cm", grid_extent_cm_).toInt();
+
+    apply_editor_font_family(saved_font_family);
+    apply_editor_font_size(saved_font_size);
+    apply_line_number_visibility(saved_line_numbers);
+    apply_theme(saved_theme);
+    auto_compile_delay_ms_ = qBound(100, saved_delay_ms, 3000);
+    if (auto_compile_timer_) {
+        auto_compile_timer_->setInterval(auto_compile_delay_ms_);
+    }
+    compiler_command_ = saved_compiler.trimmed().isEmpty() ? QStringLiteral("pdflatex") : saved_compiler.trimmed();
+    if (compile_service_) {
+        compile_service_->set_compiler_command(compiler_command_);
+    }
+
+    grid_extent_cm_ = qBound(20, saved_extent_cm, 100);
+    if (grid_extent_spin_) {
+        const QSignalBlocker blocker(grid_extent_spin_);
+        grid_extent_spin_->setValue(grid_extent_cm_);
+    }
+
+    int normalized_step = saved_step_mm;
+    if (normalized_step != 10 && normalized_step != 5 && normalized_step != 2 && normalized_step != 1 &&
+        normalized_step != 0) {
+        normalized_step = 10;
+    }
+    grid_snap_mm_ = normalized_step;
+    grid_display_mm_ = (grid_snap_mm_ == 0) ? 10 : grid_snap_mm_;
+    preview_canvas_->set_snap_mm(grid_snap_mm_);
+    if (grid_step_combo_) {
+        const QSignalBlocker blocker(grid_step_combo_);
+        const int idx = grid_step_combo_->findData(grid_snap_mm_);
+        grid_step_combo_->setCurrentIndex(idx >= 0 ? idx : 0);
+    }
+}
+
+void mainwindow::save_settings() const {
+    QSettings settings;
+    settings.setValue("ui/editor_font_family", editor_font_family_);
+    settings.setValue("ui/editor_font_size", editor_font_size_);
+    settings.setValue("ui/show_line_numbers", show_line_numbers_);
+    settings.setValue("ui/theme", theme_id_);
+    settings.setValue("build/auto_compile_delay_ms", auto_compile_delay_ms_);
+    settings.setValue("build/compiler_command", compiler_command_);
+    settings.setValue("grid/step_mm", grid_snap_mm_);
+    settings.setValue("grid/extent_cm", grid_extent_cm_);
+}
+
+void mainwindow::open_settings() {
+    settingsdialog dialog(this);
+    dialog.set_editor_font_family(editor_font_family_);
+    dialog.set_editor_font_size(editor_font_size_);
+    dialog.set_show_line_numbers(show_line_numbers_);
+    dialog.set_theme(theme_id_);
+    dialog.set_auto_compile_delay_ms(auto_compile_delay_ms_);
+    dialog.set_compiler_command(compiler_command_);
+    dialog.set_grid_step_mm(grid_snap_mm_);
+    dialog.set_grid_extent_cm(grid_extent_cm_);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    apply_editor_font_family(dialog.editor_font_family());
+    apply_editor_font_size(dialog.editor_font_size());
+    apply_line_number_visibility(dialog.show_line_numbers());
+    apply_theme(dialog.theme());
+    auto_compile_delay_ms_ = qBound(100, dialog.auto_compile_delay_ms(), 3000);
+    if (auto_compile_timer_) {
+        auto_compile_timer_->setInterval(auto_compile_delay_ms_);
+    }
+    compiler_command_ = dialog.compiler_command().trimmed().isEmpty() ? QStringLiteral("pdflatex")
+                                                                      : dialog.compiler_command().trimmed();
+    if (compile_service_) {
+        compile_service_->set_compiler_command(compiler_command_);
+    }
+
+    grid_extent_cm_ = qBound(20, dialog.grid_extent_cm(), 100);
+    if (grid_extent_spin_) {
+        const QSignalBlocker blocker(grid_extent_spin_);
+        grid_extent_spin_->setValue(grid_extent_cm_);
+    }
+
+    const int new_step = dialog.grid_step_mm();
+    grid_snap_mm_ = qMax(0, new_step);
+    grid_display_mm_ = (grid_snap_mm_ == 0) ? 10 : grid_snap_mm_;
+    preview_canvas_->set_snap_mm(grid_snap_mm_);
+    if (grid_step_combo_) {
+        const QSignalBlocker blocker(grid_step_combo_);
+        const int idx = grid_step_combo_->findData(grid_snap_mm_);
+        grid_step_combo_->setCurrentIndex(idx >= 0 ? idx : 0);
+    }
+
+    save_settings();
+    request_compile(true);
+    statusBar()->showMessage("Settings updated", 2000);
+}
+
 void mainwindow::new_file() {
     if (!editor_) {
         return;
     }
 
-    if (editor_->document()->isModified()) {
-        const QMessageBox::StandardButton res = QMessageBox::question(
-            this,
-            "New file",
-            "Discard unsaved changes and create a new file?",
-            QMessageBox::Yes | QMessageBox::No,
-            QMessageBox::No);
-        if (res != QMessageBox::Yes) {
-            return;
-        }
+    if (!maybe_save_before_action("New file", "Save changes before creating a new file?")) {
+        return;
     }
 
-    editor_->setPlainText(QString());
+    replace_editor_text_preserve_undo(QString());
     current_file_path_.clear();
     editor_->document()->setModified(false);
     update_window_title();
@@ -386,6 +776,10 @@ void mainwindow::new_file() {
 }
 
 void mainwindow::load_file() {
+    if (!maybe_save_before_action("Open file", "Save changes before opening another file?")) {
+        return;
+    }
+
     const QString path = QFileDialog::getOpenFileName(
         this,
         "Load TikZ/LaTeX File",
@@ -402,7 +796,7 @@ void mainwindow::load_file() {
     }
 
     QTextStream in(&file);
-    editor_->setPlainText(in.readAll());
+    replace_editor_text_preserve_undo(in.readAll());
     editor_->document()->setModified(false);
     current_file_path_ = path;
     update_window_title();
@@ -471,23 +865,7 @@ void mainwindow::on_document_modified_changed(bool) {
 }
 
 void mainwindow::compile() {
-    if (!editor_ || !compile_service_) {
-        return;
-    }
-
-    const QString source_text = editor_->toPlainText();
-    coordinate_refs_ = coordinateparser::extract_refs(source_text);
-    circle_refs_ = coordinateparser::extract_circle_refs(source_text);
-    ellipse_refs_ = coordinateparser::extract_ellipse_refs(source_text);
-    bezier_refs_ = coordinateparser::extract_bezier_refs(source_text);
-    rectangle_refs_ = coordinateparser::extract_rectangle_refs(source_text);
-    preview_canvas_->set_coordinates(coordinateparser::extract_pairs(source_text));
-    preview_canvas_->set_circles(coordinateparser::extract_circle_pairs(source_text));
-    preview_canvas_->set_ellipses(coordinateparser::extract_ellipse_pairs(source_text));
-    preview_canvas_->set_beziers(coordinateparser::extract_bezier_pairs(source_text));
-    preview_canvas_->set_rectangles(coordinateparser::extract_rectangle_pairs(source_text));
-    compile_service_->compile(source_text, grid_display_mm_, grid_extent_cm_);
-    statusBar()->showMessage("Compiling...");
+    request_compile(true);
 }
 
 void mainwindow::indent_latex() {
@@ -537,25 +915,36 @@ void mainwindow::indent_latex() {
 }
 
 void mainwindow::on_compile_service_output(const QString &text) {
-    append_colored_log(output_, text, QColor("#1f2937"));
+    const QString lower = text.toLower();
+    const bool has_error = lower.contains("error") || lower.contains("failed");
+    const QColor color = has_error
+                             ? (theme_id_ == "dark" ? QColor("#f87171") : QColor("#b91c1c"))
+                             : palette().color(QPalette::Text);
+    append_colored_log(output_, text, color);
 }
 
-void mainwindow::on_compile_finished(bool success, const QString &pdf_path, const QString &) {
-    if (!success) {
-        append_colored_log(output_, "[Status] Compiled with errors", QColor("#dc2626"));
-        statusBar()->showMessage("Compile failed", 3000);
-        return;
+void mainwindow::on_compile_finished(bool success, const QString &pdf_path, const QString &message) {
+    if (message != "canceled") {
+        if (!success) {
+            append_colored_log(
+                output_, "[Status] Compiled with errors", theme_id_ == "dark" ? QColor("#f87171") : QColor("#dc2626"));
+            statusBar()->showMessage("Compile failed", 3000);
+        } else if (!preview_canvas_->load_pdf(pdf_path)) {
+            on_compile_service_output("[Preview] Failed to load generated PDF");
+            append_colored_log(
+                output_, "[Status] Compiled with errors", theme_id_ == "dark" ? QColor("#f87171") : QColor("#dc2626"));
+            statusBar()->showMessage("Preview load failed", 3000);
+        } else {
+            append_colored_log(
+                output_, "[Status] Compiled successfully", theme_id_ == "dark" ? QColor("#86efac") : QColor("#16a34a"));
+            statusBar()->showMessage("Compile successful", 2500);
+        }
     }
 
-    if (!preview_canvas_->load_pdf(pdf_path)) {
-        on_compile_service_output("[Preview] Failed to load generated PDF");
-        append_colored_log(output_, "[Status] Compiled with errors", QColor("#dc2626"));
-        statusBar()->showMessage("Preview load failed", 3000);
-        return;
+    if (pending_compile_) {
+        pending_compile_ = false;
+        request_compile(false);
     }
-
-    append_colored_log(output_, "[Status] Compiled successfully", QColor("#16a34a"));
-    statusBar()->showMessage("Compile successful", 2500);
 }
 
 void mainwindow::on_coordinate_dragged(int index, double x, double y) {
@@ -577,7 +966,7 @@ void mainwindow::on_coordinate_dragged(int index, double x, double y) {
 
     const QString replacement = "(" + coordinateparser::format_number(x) + "," + coordinateparser::format_number(y) + ")";
     text.replace(ref.start, ref.end - ref.start, replacement);
-    editor_->setPlainText(text);
+    replace_editor_text_preserve_undo(text);
     compile();
 }
 
@@ -600,7 +989,7 @@ void mainwindow::on_circle_radius_dragged(int index, double radius) {
 
     const QString replacement = coordinateparser::format_number(radius);
     text.replace(ref.radius_start, ref.radius_end - ref.radius_start, replacement);
-    editor_->setPlainText(text);
+    replace_editor_text_preserve_undo(text);
     compile();
 }
 
@@ -636,7 +1025,7 @@ void mainwindow::on_ellipse_radii_dragged(int index, double rx, double ry) {
         text.replace(ref.rx_start, ref.rx_end - ref.rx_start, rx_str);
     }
 
-    editor_->setPlainText(text);
+    replace_editor_text_preserve_undo(text);
     compile();
 }
 
@@ -683,7 +1072,7 @@ void mainwindow::on_bezier_control_dragged(int index, int control_idx, double x,
         text.replace(y_start, y_end - y_start, y_str);
         text.replace(x_start, x_end - x_start, x_str);
     }
-    editor_->setPlainText(text);
+    replace_editor_text_preserve_undo(text);
     compile();
 }
 
@@ -719,7 +1108,7 @@ void mainwindow::on_rectangle_corner_dragged(int index, double x2, double y2) {
         text.replace(ref.x2_start, ref.x2_end - ref.x2_start, x2_str);
     }
 
-    editor_->setPlainText(text);
+    replace_editor_text_preserve_undo(text);
     compile();
 }
 
@@ -735,15 +1124,11 @@ void mainwindow::on_grid_step_changed(int) {
             : ("Grid/Snap step: " + QString::number(grid_snap_mm_) + " mm"),
         1500);
 
-    if (compile_service_ && !compile_service_->is_busy()) {
-        compile();
-    }
+    request_compile(true);
 }
 
 void mainwindow::on_grid_extent_changed(int value) {
     grid_extent_cm_ = qBound(20, value, 100);
     statusBar()->showMessage("Grid extent: " + QString::number(grid_extent_cm_) + " cm", 1500);
-    if (compile_service_ && !compile_service_->is_busy()) {
-        compile();
-    }
+    request_compile(true);
 }

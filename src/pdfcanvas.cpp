@@ -54,10 +54,10 @@ void pdfcanvas::paintEvent(QPaintEvent *event) {
     Q_UNUSED(event)
 
     QPainter painter(this);
-    painter.fillRect(rect(), QColor("#ffffff"));
+    painter.fillRect(rect(), palette().color(QPalette::Window));
 
     if (pdf_document_.status() != QPdfDocument::Status::Ready || pdf_document_.pageCount() <= 0) {
-        painter.setPen(QColor("#666666"));
+        painter.setPen(palette().color(QPalette::Text));
         painter.drawText(rect(), Qt::AlignCenter, "Compile to preview output");
         return;
     }
@@ -75,6 +75,7 @@ void pdfcanvas::paintEvent(QPaintEvent *event) {
                             static_cast<int>((height() - h) * 0.5 + pan_offset_.y()),
                             w,
                             h);
+    painter.fillRect(target_rect, QColor("#ffffff"));
 
     if (rendered_image_.isNull() || rendered_size_ != target_rect.size()) {
         rendered_image_ = pdf_document_.render(0, target_rect.size());

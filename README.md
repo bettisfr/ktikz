@@ -8,7 +8,7 @@ QTikZ is a Qt desktop editor for TikZ with live PDF preview and direct manipulat
 - Right pane: compiled PDF preview rendered with `QPdfDocument`
 - Bottom pane: compilation log output
 - Startup: empty editor and maximized window
-- Menu/toolbar actions: `Load`, `Indent`, `Compile`, `Examples`, `Help`
+- Menu/toolbar actions: `New`, `Load`, `Save`, `Save As`, `Undo`, `Redo`, `Indent`, `Compile`
 
 ## Interactive Editing
 
@@ -28,10 +28,13 @@ Current editable primitives:
 
 Marker changes update the source text and trigger recompilation.
 
-## Editing Utilities
+## Editing and Build Utilities
 
 - `Indent` action (toolbar and Build menu) auto-formats LaTeX indentation using `\begin{...}` / `\end{...}` structure.
 - Console panel includes a `Clear` button to quickly reset compile output.
+- Document modification state is shown with `*` in the window title.
+- `New/Open/Quit` support `Save / Discard / Cancel` when there are unsaved changes.
+- Auto-compile runs with debounce while editing.
 
 ## Grid and Snap
 
@@ -45,6 +48,20 @@ Behavior:
 - non-zero snap values quantize drag operations to the selected step
 - `0 (free)` disables snapping but keeps a 10 mm display reference grid
 - changing step or extent recompiles automatically
+
+## Settings
+
+`Edit -> Settings...` includes:
+
+- editor font family
+- editor font size
+- line numbers visibility
+- auto-compile delay
+- LaTeX compiler command/path (default: `pdflatex`)
+- look and feel: `System`, `Light`, `Dark`
+- grid snap step and extent defaults
+
+Settings are persisted with `QSettings`.
 
 ## Examples
 
@@ -71,8 +88,7 @@ cmake --build build -j
 
 Platform-specific guides:
 
-- Windows: `BUILD_WINDOWS.md`
-- macOS: `BUILD_MACOS.md`
+- `BUILD_WINDOWS.md` and `BUILD_MACOS.md` were removed from this repository.
 
 ## Run
 
@@ -84,8 +100,9 @@ Platform-specific guides:
 
 - `src/main.cpp`: application entry point
 - `src/mainwindow.h`, `src/mainwindow.cpp`: main UI and application flow
+- `src/settingsdialog.h`, `src/settingsdialog.cpp`: application settings dialog
 - `src/pdfcanvas.h`, `src/pdfcanvas.cpp`: preview rendering, calibration, markers, drag logic
-- `src/compileservice.h`, `src/compileservice.cpp`: TeX generation, grid injection, `pdflatex` execution
+- `src/compileservice.h`, `src/compileservice.cpp`: TeX generation, grid injection, compiler process execution
 - `src/coordinateparser.h`, `src/coordinateparser.cpp`: numeric geometry parsing and formatting
 - `src/model.h`: shared geometry data models
 

@@ -22,6 +22,8 @@ add_executable(qtikz
     src/coordinateparser.h
     src/model.h
     src/appconfig.h
+    src/settingsdialog.cpp
+    src/settingsdialog.h
 )
 
 target_link_libraries(qtikz PRIVATE

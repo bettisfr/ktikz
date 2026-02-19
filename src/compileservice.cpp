@@ -17,6 +17,23 @@ bool compileservice::is_busy() const {
     return proc_.state() != QProcess::NotRunning;
 }
 
+void compileservice::set_compiler_command(const QString &command) {
+    const QString trimmed = command.trimmed();
+    compiler_command_ = trimmed.isEmpty() ? QStringLiteral("pdflatex") : trimmed;
+}
+
+QString compileservice::compiler_command() const {
+    return compiler_command_;
+}
+
+void compileservice::cancel() {
+    if (!is_busy()) {
+        return;
+    }
+    canceled_ = true;
+    proc_.kill();
+}
+
 bool compileservice::ensure_work_dir() {
     if (!work_dir_path_.isEmpty()) {
         return true;
@@ -84,6 +101,7 @@ void compileservice::compile(const QString &source_text, int grid_step_mm, int g
         emit output_text("[Compile] Already running");
         return;
     }
+    canceled_ = false;
 
     if (!ensure_work_dir()) {
         emit output_text("[Compile] Could not create temporary directory");
@@ -103,17 +121,19 @@ void compileservice::compile(const QString &source_text, int grid_step_mm, int g
     tex_file.close();
 
     emit output_text("\n[Compile] " + QDateTime::currentDateTime().toString(Qt::ISODate));
-    emit output_text("[Compile] Running pdflatex...");
+    emit output_text("[Compile] Running " + compiler_command_ + "...");
 
     proc_.setWorkingDirectory(work_dir_path_);
     proc_.setProcessEnvironment(QProcessEnvironment::systemEnvironment());
-    proc_.start("pdflatex",
-                QStringList() << "-interaction=nonstopmode"
-                              << "-halt-on-error"
-                              << "-file-line-error"
-                              << "document.tex");
+    QStringList command_parts = QProcess::splitCommand(compiler_command_);
+    QString program = QStringLiteral("pdflatex");
+    if (!command_parts.isEmpty()) {
+        program = command_parts.takeFirst();
+    }
+    command_parts << "-interaction=nonstopmode" << "-halt-on-error" << "-file-line-error" << "document.tex";
+    proc_.start(program, command_parts);
     if (!proc_.waitForStarted(1500)) {
-        emit output_text("[Error] Unable to start pdflatex");
+        emit output_text("[Error] Unable to start compiler: " + compiler_command_);
         emit compile_finished(false, QString(), "start failed");
     }
 }
@@ -130,6 +150,13 @@ void compileservice::on_ready_output() {
 }
 
 void compileservice::on_finished(int exit_code, QProcess::ExitStatus status) {
+    if (canceled_) {
+        canceled_ = false;
+        emit output_text("[Compile] Canceled");
+        emit compile_finished(false, QString(), "canceled");
+        return;
+    }
+
     if (status != QProcess::NormalExit || exit_code != 0) {
         emit output_text("[Compile] Failed");
         emit compile_finished(false, QString(), "compile failed");
