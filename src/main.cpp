@@ -35,6 +35,12 @@
 
 #include <cmath>
 #include <memory>
+#include <vector>
+
+struct CoordPair {
+    double x = 0.0;
+    double y = 0.0;
+};
 
 class PdfCanvas : public QWidget {
     Q_OBJECT
@@ -42,6 +48,11 @@ class PdfCanvas : public QWidget {
 public:
     explicit PdfCanvas(QWidget *parent = nullptr) : QWidget(parent) {
         setFocusPolicy(Qt::StrongFocus);
+    }
+
+    void setCoordinates(const std::vector<CoordPair> &coords) {
+        coordinates_ = coords;
+        update();
     }
 
     bool loadPdf(const QString &pdfPath) {
@@ -88,6 +99,9 @@ protected:
             painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
             painter.drawImage(targetRect, renderedImage_);
         }
+
+        updateCalibration(targetRect);
+        drawCoordinateMarkers(painter);
     }
 
     void wheelEvent(QWheelEvent *event) override {
@@ -140,6 +154,85 @@ protected:
     }
 
 private:
+    static bool findColorCentroid(const QImage &img, char target, QPointF &centroidOut) {
+        if (img.isNull()) {
+            return false;
+        }
+        double sx = 0.0;
+        double sy = 0.0;
+        int count = 0;
+        for (int y = 0; y < img.height(); ++y) {
+            const QRgb *row = reinterpret_cast<const QRgb *>(img.constScanLine(y));
+            for (int x = 0; x < img.width(); ++x) {
+                const int r = qRed(row[x]);
+                const int g = qGreen(row[x]);
+                const int b = qBlue(row[x]);
+                bool hit = false;
+                if (target == 'r') {
+                    hit = (r > 200 && g < 90 && b < 90);
+                } else if (target == 'g') {
+                    hit = (g > 200 && r < 90 && b < 90);
+                } else if (target == 'b') {
+                    hit = (b > 200 && r < 90 && g < 90);
+                }
+                if (hit) {
+                    sx += static_cast<double>(x);
+                    sy += static_cast<double>(y);
+                    ++count;
+                }
+            }
+        }
+        if (count < 3) {
+            return false;
+        }
+        centroidOut = QPointF(sx / count, sy / count);
+        return true;
+    }
+
+    void updateCalibration(const QRect &targetRect) {
+        calibrationValid_ = false;
+        if (renderedImage_.isNull() || !targetRect.isValid()) {
+            return;
+        }
+        QPointF redLocal, greenLocal, blueLocal;
+        if (!findColorCentroid(renderedImage_, 'r', redLocal) ||
+            !findColorCentroid(renderedImage_, 'g', greenLocal) ||
+            !findColorCentroid(renderedImage_, 'b', blueLocal)) {
+            return;
+        }
+        const QPointF topLeft = targetRect.topLeft();
+        originPx_ = topLeft + redLocal;   // (0,0)
+        axisXPx_ = topLeft + greenLocal;  // (1,0)
+        axisYPx_ = topLeft + blueLocal;   // (0,1)
+
+        const QPointF u = axisXPx_ - originPx_;
+        const QPointF v = axisYPx_ - originPx_;
+        const double det = u.x() * v.y() - u.y() * v.x();
+        calibrationValid_ = std::abs(det) > 1e-6;
+    }
+
+    QPointF worldToScreen(double x, double y) const {
+        const QPointF u = axisXPx_ - originPx_;
+        const QPointF v = axisYPx_ - originPx_;
+        return originPx_ + u * x + v * y;
+    }
+
+    void drawCoordinateMarkers(QPainter &painter) {
+        if (!calibrationValid_ || coordinates_.empty()) {
+            return;
+        }
+        painter.save();
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.setPen(QPen(QColor("#dc2626"), 2.0));
+        constexpr int half = 6;
+        for (const CoordPair &c : coordinates_) {
+            const QPointF p = worldToScreen(c.x, c.y);
+            painter.drawLine(QPointF(p.x() - half, p.y()), QPointF(p.x() + half, p.y()));
+            painter.drawLine(QPointF(p.x(), p.y() - half), QPointF(p.x(), p.y() + half));
+        }
+        painter.restore();
+    }
+
     QPdfDocument pdfDocument_;
     QImage renderedImage_;
     QSize renderedSize_;
@@ -147,6 +240,11 @@ private:
     QPointF panOffset_{0.0, 0.0};
     bool dragging_ = false;
     QPointF lastDragPos_{0.0, 0.0};
+    std::vector<CoordPair> coordinates_;
+    bool calibrationValid_ = false;
+    QPointF originPx_{0.0, 0.0};
+    QPointF axisXPx_{1.0, 0.0};
+    QPointF axisYPx_{0.0, -1.0};
 };
 
 class MainWindow : public KMainWindow {
@@ -170,7 +268,7 @@ public:
         QFont editorFont;
         editorFont.setFamily(QStringLiteral("Monospace"));
         editorFont.setStyleHint(QFont::Monospace);
-        editorFont.setPointSize(14);
+        editorFont.setPointSize(12);
         editorView_->setConfigValue(QStringLiteral("font"), editorFont);
 
         editorDoc_->setText(
@@ -292,11 +390,35 @@ private:
             "\n  % ktikz preview grid\n"
             "  \\draw[step=1, gray!35, very thin] (-10,-10) grid (10,10);\n"
             "  \\draw[gray!60, thin] (-10,0) -- (10,0);\n"
-            "  \\draw[gray!60, thin] (0,-10) -- (0,10);\n";
+            "  \\draw[gray!60, thin] (0,-10) -- (0,10);\n"
+            "  % ktikz calibration markers (tiny)\n"
+            "  \\fill[draw=none,fill={rgb,255:red,255;green,0;blue,0}] (0,0) circle[radius=0.7pt];\n"
+            "  \\fill[draw=none,fill={rgb,255:red,0;green,255;blue,0}] (1,0) circle[radius=0.7pt];\n"
+            "  \\fill[draw=none,fill={rgb,255:red,0;green,0;blue,255}] (0,1) circle[radius=0.7pt];\n";
 
         QString out = source;
         out.insert(m.capturedEnd(0), gridBlock);
         return out;
+    }
+
+    static std::vector<CoordPair> extractCoordinates(const QString &source) {
+        static const QRegularExpression coordPattern(
+            R"(\(\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*,\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*\))");
+
+        std::vector<CoordPair> coords;
+        QRegularExpressionMatchIterator it = coordPattern.globalMatch(source);
+        while (it.hasNext()) {
+            const QRegularExpressionMatch m = it.next();
+            bool okX = false;
+            bool okY = false;
+            const double x = m.captured(1).toDouble(&okX);
+            const double y = m.captured(2).toDouble(&okY);
+            if (!okX || !okY) {
+                continue;
+            }
+            coords.push_back({x, y});
+        }
+        return coords;
     }
 
     void compile() {
@@ -310,7 +432,9 @@ private:
             return;
         }
 
-        const QString compileSource = withInjectedGrid(editorDoc_->text());
+        const QString sourceText = editorDoc_->text();
+        const QString compileSource = withInjectedGrid(sourceText);
+        previewCanvas_->setCoordinates(extractCoordinates(sourceText));
 
         QFile texFile(workDirPath_ + "/document.tex");
         if (!texFile.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
