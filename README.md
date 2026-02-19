@@ -86,10 +86,6 @@ cmake -S . -B build
 cmake --build build -j
 ```
 
-Platform-specific guides:
-
-- `BUILD_WINDOWS.md` and `BUILD_MACOS.md` were removed from this repository.
-
 ## Run
 
 ```bash
