@@ -1,69 +1,80 @@
 # KTikZ
 
-A KDE/Qt TikZ editor prototype with live preview, smart coordinate markers, and drag-to-edit workflow.
+KTikZ is a KDE/Qt desktop editor for TikZ with live PDF preview and direct manipulation of geometric parameters.
 
-## ✨ Features
+## Overview
 
-- 📝 **Left pane**: Kate-like LaTeX editor (`KTextEditor`)
-- 🖼️ **Right pane**: compiled PDF preview (`QPdfDocument` rendering)
-- 📜 **Bottom pane**: live LaTeX compilation output
-- 🧭 **Toolbar/Menu**: `Load`, `Compile`, `Quit`
+- Left pane: LaTeX/TikZ editor powered by `KTextEditor`
+- Right pane: compiled PDF preview rendered with `QPdfDocument`
+- Bottom pane: compilation log output
+- Menu/toolbar actions: `Load`, `Compile`, and `Examples`
 
-### Preview interactions
+## Interactive Editing
 
-- 🔍 Mouse wheel zoom
-- ✋ Click-drag pan
-- ➕ Red `+` markers for detected `(x,y)` coordinates
-- 🧲 Marker drag updates source coordinates and auto-recompiles
+The preview supports:
 
-## 📐 Grid & Snap Control
+- mouse-wheel zoom
+- click-drag pan
+- draggable red markers over parsed geometry
 
-The control below the right pane supports:
+Current editable primitives:
 
-- `10 mm`
-- `5 mm`
-- `2 mm`
-- `1 mm`
-- `0 (free)`
+- coordinate pairs `(x,y)`
+- circles (`radius`)
+- rectangles (second corner)
+- ellipses (`rx`, `ry`)
+- cubic Bezier curves (`control 1`, `control 2`)
+
+Marker changes update the source text and trigger recompilation.
+
+## Grid and Snap
+
+Controls below the preview include:
+
+- snap step combobox: `10 mm`, `5 mm`, `2 mm`, `1 mm`, `0 (free)`
+- grid extent spinbox: `20..100 cm`
 
 Behavior:
 
-- Non-zero values: grid is injected into compiled TikZ and marker drag snaps to that step.
-- `0 (free)`: marker drag is free-hand, while preview grid defaults to **10 mm** major references.
-- Changing the value triggers automatic recompile.
+- non-zero snap values quantize drag operations to the selected step
+- `0 (free)` disables snapping but keeps a 10 mm display reference grid
+- changing step or extent recompiles automatically
 
-## 🧠 Coordinate Detection
+## Examples
 
-Coordinates are parsed from source in numeric pair form:
+The `Examples` menu includes ready-made snippets for:
 
-- `(x,y)`
-- `(x, y)`
+- line
+- polyline
+- circle
+- rectangle
+- ellipse
+- Bezier
+- mixed playground
 
-Supported numbers: integer, decimal, scientific notation.
-
-## 🏗️ Build
+## Build
 
 ```bash
 cmake -S . -B build
 cmake --build build -j
 ```
 
-## ▶️ Run
+## Run
 
 ```bash
 ./build/ktikz
 ```
 
-## 🗂️ Project Structure
+## Project Structure
 
-- `src/main.cpp` - app entrypoint
-- `src/mainwindow.h`, `src/mainwindow.cpp` - UI composition and signal wiring
-- `src/pdfcanvas.h`, `src/pdfcanvas.cpp` - PDF preview, calibration, marker draw/drag
-- `src/compileservice.h`, `src/compileservice.cpp` - TeX generation, grid injection, `pdflatex` execution
-- `src/coordinateparser.h`, `src/coordinateparser.cpp` - coordinate extraction and numeric formatting
-- `src/model.h` - shared coordinate structs
+- `src/main.cpp`: application entry point
+- `src/mainwindow.h`, `src/mainwindow.cpp`: main UI and application flow
+- `src/pdfcanvas.h`, `src/pdfcanvas.cpp`: preview rendering, calibration, markers, drag logic
+- `src/compileservice.h`, `src/compileservice.cpp`: TeX generation, grid injection, `pdflatex` execution
+- `src/coordinateparser.h`, `src/coordinateparser.cpp`: numeric geometry parsing and formatting
+- `src/model.h`: shared geometry data models
 
-## ⚠️ Notes
+## Notes
 
-- Calibration anchors are injected at compile-time to align preview pixels and TikZ coordinates reliably.
-- Anchors are placed on the top layer so user drawings do not hide them.
+- Calibration anchors are injected during compilation to align PDF pixels with TikZ coordinates.
+- Anchors are drawn on the top layer to remain detectable regardless of figure colors.
