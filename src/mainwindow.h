@@ -86,6 +86,8 @@ private:
     QLabel *props_label_3_ = nullptr;
     QLabel *props_label_4_ = nullptr;
     QComboBox *props_color_combo_ = nullptr;
+    QComboBox *props_endpoint_start_combo_ = nullptr;
+    QComboBox *props_endpoint_end_combo_ = nullptr;
     QComboBox *props_line_style_combo_ = nullptr;
     QComboBox *props_thickness_combo_ = nullptr;
     QComboBox *props_draw_opacity_combo_ = nullptr;

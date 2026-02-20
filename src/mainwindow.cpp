@@ -9,6 +9,7 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFrame>
 #include <QFont>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -21,6 +22,7 @@
 #include <QPainter>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSplitter>
 #include <QSpinBox>
 #include <QStatusBar>
@@ -303,9 +305,12 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
 
     right_layout->addWidget(controls_row, 0);
 
-    auto *properties_pane = new QWidget(right_splitter);
+    auto *properties_scroll = new QScrollArea(right_splitter);
+    properties_scroll->setWidgetResizable(true);
+    properties_scroll->setFrameShape(QFrame::NoFrame);
+    properties_scroll->setMinimumWidth(260);
+    auto *properties_pane = new QWidget(properties_scroll);
     properties_pane->setObjectName("propertiesPane");
-    properties_pane->setMinimumWidth(230);
     auto *properties_layout = new QVBoxLayout(properties_pane);
     properties_layout->setContentsMargins(8, 8, 8, 8);
     properties_layout->setSpacing(6);
@@ -313,9 +318,15 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
     QFont title_font = properties_title->font();
     title_font.setBold(true);
     properties_title->setFont(title_font);
-    auto *selection_label = new QLabel("Selection:", properties_pane);
-    props_selection_value_ = new QLabel("-", properties_pane);
-    props_selection_value_->setWordWrap(true);
+    auto *selection_label = new QLabel("Selected Object", properties_pane);
+    QFont selection_title_font = selection_label->font();
+    selection_title_font.setBold(true);
+    selection_label->setFont(selection_title_font);
+    props_selection_value_ = new QLabel("None", properties_pane);
+    props_selection_value_->setObjectName("selectionPill");
+    props_selection_value_->setAlignment(Qt::AlignCenter);
+    props_selection_value_->setStyleSheet(
+        "padding:4px 8px; border:1px solid #cbd5e1; border-radius:8px; background:#f8fafc; color:#0f172a;");
 
     auto mk_spin = [properties_pane]() {
         auto *s = new QDoubleSpinBox(properties_pane);
@@ -357,8 +368,21 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
 
     props_color_combo_ = new QComboBox(properties_pane);
     props_color_combo_->addItems({"black", "blue", "red", "green", "orange", "magenta", "brown", "cyan", "gray", "yellow"});
+    props_endpoint_start_combo_ = new QComboBox(properties_pane);
+    props_endpoint_start_combo_->addItems({"none", "arrow", "bar"});
+    props_endpoint_end_combo_ = new QComboBox(properties_pane);
+    props_endpoint_end_combo_->addItems({"none", "arrow", "bar"});
     props_line_style_combo_ = new QComboBox(properties_pane);
-    props_line_style_combo_->addItems({"solid", "dashed", "dotted"});
+    props_line_style_combo_->addItems({"solid",
+                                       "dashed",
+                                       "densely dashed",
+                                       "loosely dashed",
+                                       "dotted",
+                                       "densely dotted",
+                                       "loosely dotted",
+                                       "dashdotted",
+                                       "densely dashdotted",
+                                       "loosely dashdotted"});
     props_thickness_combo_ = new QComboBox(properties_pane);
     props_thickness_combo_->addItems({"thin", "semithick", "thick", "very thick", "ultra thick"});
     props_draw_opacity_combo_ = new QComboBox(properties_pane);
@@ -374,6 +398,12 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
         props_fill_opacity_combo_->addItem(QString::number(v, 'f', 1), v);
     }
     connect(props_color_combo_, &QComboBox::currentTextChanged, this, [this](const QString &) {
+        apply_selected_style_changes();
+    });
+    connect(props_endpoint_start_combo_, &QComboBox::currentTextChanged, this, [this](const QString &) {
+        apply_selected_style_changes();
+    });
+    connect(props_endpoint_end_combo_, &QComboBox::currentTextChanged, this, [this](const QString &) {
         apply_selected_style_changes();
     });
     connect(props_line_style_combo_, &QComboBox::currentTextChanged, this, [this](const QString &) {
@@ -394,6 +424,8 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
     auto *border_form = new QFormLayout;
     border_form->setContentsMargins(0, 0, 0, 0);
     border_form->addRow("Color", props_color_combo_);
+    border_form->addRow("Endpoint start", props_endpoint_start_combo_);
+    border_form->addRow("Endpoint end", props_endpoint_end_combo_);
     border_form->addRow("Style", props_line_style_combo_);
     border_form->addRow("Thickness", props_thickness_combo_);
     border_form->addRow("Opacity", props_draw_opacity_combo_);
@@ -417,9 +449,10 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
     properties_layout->addWidget(border_box);
     properties_layout->addWidget(fill_box);
     properties_layout->addStretch(1);
+    properties_scroll->setWidget(properties_pane);
 
     right_splitter->addWidget(right_pane);
-    right_splitter->addWidget(properties_pane);
+    right_splitter->addWidget(properties_scroll);
     right_splitter->setStretchFactor(0, 4);
     right_splitter->setStretchFactor(1, 1);
     right_splitter->setSizes({780, 250});
@@ -441,6 +474,9 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
     output_header_layout->setContentsMargins(0, 0, 0, 0);
     output_header_layout->setSpacing(6);
     auto *output_label = new QLabel("Console output", output_header);
+    QFont output_label_font = output_label->font();
+    output_label_font.setBold(true);
+    output_label->setFont(output_label_font);
     auto *clear_log_btn = new QPushButton("Clear", output_header);
     connect(clear_log_btn, &QPushButton::clicked, this, [this]() {
         if (output_) {
@@ -766,7 +802,8 @@ void mainwindow::apply_theme(const QString &theme_id) {
             "QLabel{color:#e6e6e6;}"
             "QWidget#previewRightPane{background-color:#2d2d2d;}"
             "QWidget#previewControlsRow{background-color:#2d2d2d;}"
-            "QWidget#propertiesPane{background-color:#2d2d2d;}");
+            "QWidget#propertiesPane{background-color:#2d2d2d;}"
+            "QLabel#selectionPill{background-color:#1f2937;color:#e5e7eb;border:1px solid #4b5563;border-radius:8px;padding:4px 8px;}");
         return;
     }
 
@@ -1334,7 +1371,7 @@ bool mainwindow::selected_command_span(int &start_out, int &end_out) const {
 
 void mainwindow::clear_properties_panel(const QString &message) {
     if (props_selection_value_) {
-        props_selection_value_->setText("-");
+        props_selection_value_->setText("None");
     }
     auto disable_spin = [](QLabel *lbl, QDoubleSpinBox *spin) {
         if (lbl) {
@@ -1353,6 +1390,16 @@ void mainwindow::clear_properties_panel(const QString &message) {
         const QSignalBlocker blocker(props_color_combo_);
         props_color_combo_->setCurrentIndex(0);
         props_color_combo_->setEnabled(!selected_type_.isEmpty());
+    }
+    if (props_endpoint_start_combo_) {
+        const QSignalBlocker blocker(props_endpoint_start_combo_);
+        props_endpoint_start_combo_->setCurrentIndex(0);
+        props_endpoint_start_combo_->setEnabled(!selected_type_.isEmpty());
+    }
+    if (props_endpoint_end_combo_) {
+        const QSignalBlocker blocker(props_endpoint_end_combo_);
+        props_endpoint_end_combo_->setCurrentIndex(0);
+        props_endpoint_end_combo_->setEnabled(!selected_type_.isEmpty());
     }
     if (props_line_style_combo_) {
         const QSignalBlocker blocker(props_line_style_combo_);
@@ -1410,6 +1457,12 @@ void mainwindow::update_properties_panel() {
     }
     if (props_line_style_combo_) {
         props_line_style_combo_->setEnabled(true);
+    }
+    if (props_endpoint_start_combo_) {
+        props_endpoint_start_combo_->setEnabled(true);
+    }
+    if (props_endpoint_end_combo_) {
+        props_endpoint_end_combo_->setEnabled(true);
     }
     if (props_thickness_combo_) {
         props_thickness_combo_->setEnabled(true);
@@ -1497,12 +1550,56 @@ void mainwindow::update_properties_panel() {
             set_combo_value(props_color_combo_, draw_color);
 
             QString style = "solid";
-            if (has_token("dashed")) {
-                style = "dashed";
-            } else if (has_token("dotted")) {
-                style = "dotted";
+            const QStringList styles = {"loosely dashdotted",
+                                        "densely dashdotted",
+                                        "dashdotted",
+                                        "loosely dashed",
+                                        "densely dashed",
+                                        "dashed",
+                                        "loosely dotted",
+                                        "densely dotted",
+                                        "dotted"};
+            for (const QString &s : styles) {
+                if (has_token(s)) {
+                    style = s;
+                    break;
+                }
             }
             set_combo_value(props_line_style_combo_, style);
+
+            QString endpoint = "-";
+            const QStringList endpoints = {"<->", "|->", "<-|", "|-|", "->", "<-", "-|", "|-"};
+            for (const QString &ep : endpoints) {
+                if (has_token(ep)) {
+                    endpoint = ep;
+                    break;
+                }
+            }
+            QString start_cap = "none";
+            QString end_cap = "none";
+            if (endpoint == "<->") {
+                start_cap = "arrow";
+                end_cap = "arrow";
+            } else if (endpoint == "->") {
+                end_cap = "arrow";
+            } else if (endpoint == "<-") {
+                start_cap = "arrow";
+            } else if (endpoint == "|->") {
+                start_cap = "bar";
+                end_cap = "arrow";
+            } else if (endpoint == "<-|") {
+                start_cap = "arrow";
+                end_cap = "bar";
+            } else if (endpoint == "|-|") {
+                start_cap = "bar";
+                end_cap = "bar";
+            } else if (endpoint == "-|") {
+                end_cap = "bar";
+            } else if (endpoint == "|-") {
+                start_cap = "bar";
+            }
+            set_combo_value(props_endpoint_start_combo_, start_cap);
+            set_combo_value(props_endpoint_end_combo_, end_cap);
 
             QString thick = "thin";
             const QStringList thicknesses = {"ultra thick", "very thick", "thick", "semithick", "thin"};
@@ -1531,6 +1628,15 @@ void mainwindow::update_properties_panel() {
             bool ok_fill_op = false;
             const double fill_op = find_prefix_value("fill opacity=").toDouble(&ok_fill_op);
             set_opacity_combo(props_fill_opacity_combo_, ok_fill_op ? fill_op : 1.0);
+
+            if (command_name == "node" && props_endpoint_start_combo_ && props_endpoint_end_combo_) {
+                const QSignalBlocker blocker1(props_endpoint_start_combo_);
+                const QSignalBlocker blocker2(props_endpoint_end_combo_);
+                props_endpoint_start_combo_->setCurrentIndex(0);
+                props_endpoint_end_combo_->setCurrentIndex(0);
+                props_endpoint_start_combo_->setEnabled(false);
+                props_endpoint_end_combo_->setEnabled(false);
+            }
         }
     }
 
@@ -1710,8 +1816,44 @@ void mainwindow::apply_selected_style_changes() {
         opts.push_back("draw=" + color);
     }
 
+    if (!is_node_command) {
+        const QString start_cap = props_endpoint_start_combo_ ? props_endpoint_start_combo_->currentText() : QString("none");
+        const QString end_cap = props_endpoint_end_combo_ ? props_endpoint_end_combo_->currentText() : QString("none");
+        remove_tokens({"<->", "|->", "<-|", "|-|", "->", "<-", "-|", "|-", "-"});
+        QString endpoint = "-";
+        if (start_cap == "arrow" && end_cap == "arrow") {
+            endpoint = "<->";
+        } else if (start_cap == "arrow" && end_cap == "bar") {
+            endpoint = "<-|";
+        } else if (start_cap == "bar" && end_cap == "arrow") {
+            endpoint = "|->";
+        } else if (start_cap == "bar" && end_cap == "bar") {
+            endpoint = "|-|";
+        } else if (start_cap == "arrow") {
+            endpoint = "<-";
+        } else if (end_cap == "arrow") {
+            endpoint = "->";
+        } else if (start_cap == "bar") {
+            endpoint = "|-";
+        } else if (end_cap == "bar") {
+            endpoint = "-|";
+        }
+        if (endpoint != "-") {
+            opts.push_back(endpoint);
+        }
+    }
+
     const QString line_style = props_line_style_combo_ ? props_line_style_combo_->currentText() : QString("solid");
-    remove_tokens({"dashed", "dotted", "solid"});
+    remove_tokens({"dashed",
+                   "densely dashed",
+                   "loosely dashed",
+                   "dotted",
+                   "densely dotted",
+                   "loosely dotted",
+                   "dashdotted",
+                   "densely dashdotted",
+                   "loosely dashdotted",
+                   "solid"});
     if (line_style != "solid") {
         opts.push_back(line_style);
     }
