@@ -1,83 +1,91 @@
 # QTikZ
 
-QTikZ is a Qt desktop editor for TikZ with live PDF preview and direct manipulation of geometric parameters.
+QTikZ is a desktop TikZ editor built with Qt 6.
+It combines source editing, compilation, and interactive geometry manipulation in a single application for rapid figure iteration.
 
-## Overview
+## Purpose
 
-- Left pane: LaTeX/TikZ editor powered by `QPlainTextEdit`
-- Right pane: compiled PDF preview rendered with `QPdfDocument`
-- Bottom pane: compilation log output
-- Startup: empty editor and maximized window
-- Menu/toolbar actions: `New`, `Load`, `Save`, `Save As`, `Undo`, `Redo`, `Indent`, `Compile`
+QTikZ is designed for users who need to:
 
-## Interactive Editing
+- edit TikZ/LaTeX source directly
+- compile and preview results immediately
+- adjust geometric primitives visually and write changes back to source
 
-The preview supports:
+The project targets a practical authoring workflow rather than full TikZ language coverage.
 
-- mouse-wheel zoom
-- click-drag pan
-- draggable red markers over parsed geometry
+## Core Capabilities
 
-Current editable primitives:
+- Two-way editing workflow:
+  - source-first editing in a LaTeX/TikZ editor
+  - canvas-assisted editing through draggable control markers
+- Live PDF preview using Qt PDF rendering
+- Integrated compilation log with status feedback
+- Configurable grid, snapping, and canvas interaction
+- Built-in object insertion panel (line, polyline, circle, rectangle, ellipse, bezier, text)
+- Object properties panel for geometry and style editing
 
-- coordinate pairs `(x,y)`
-- circles (`radius`)
-- rectangles (second corner)
-- ellipses (`rx`, `ry`)
-- cubic Bezier curves (`control 1`, `control 2`)
+## User Interface
 
-Marker changes update the source text and trigger recompilation.
+- Left stripe and panel:
+  - IDE-style vertical toggle (`Add object`) to show/hide the Objects panel
+  - object insertion actions
+- Main editor/preview area:
+  - left: syntax-highlighted LaTeX/TikZ editor with line numbers
+  - right: PDF preview canvas with zoom/pan and interactive markers
+  - far right: scrollable Properties panel for selected objects
+- Bottom area:
+  - console output with clear action
 
-## Editing and Build Utilities
+## Editing and Interaction
 
-- `Indent` action (toolbar and Build menu) auto-formats LaTeX indentation using `\begin{...}` / `\end{...}` structure.
-- Console panel includes a `Clear` button to quickly reset compile output.
-- Document modification state is shown with `*` in the window title.
-- `New/Open/Quit` support `Save / Discard / Cancel` when there are unsaved changes.
-- Auto-compile runs with debounce while editing.
+### Source Editing
 
-## Grid and Snap
+- Monospace code editor
+- LaTeX syntax highlighting
+- Auto indentation (`Indent` action)
+- Undo/redo, save/save-as, modification tracking (`*` in title)
 
-Controls below the preview include:
+### Canvas Interaction
 
-- snap step combobox: `10 mm`, `5 mm`, `2 mm`, `1 mm`, `0 (free)`
-- grid extent spinbox: `20..100 cm`
+- Mouse wheel zoom
+- Drag to pan
+- Marker-based geometry updates for supported primitives
+- Click-to-place insertion mode for object creation
 
-Behavior:
+### Properties Editing
 
-- non-zero snap values quantize drag operations to the selected step
-- `0 (free)` disables snapping but keeps a 10 mm display reference grid
-- changing step or extent recompiles automatically
+For selected objects, QTikZ exposes editable properties such as:
+
+- geometry values (coordinates, radii, control points)
+- border color, endpoint caps (start/end), line style, thickness, opacity
+- fill color and fill opacity
+
+Updates are applied to the source and recompiled automatically.
+
+## Compilation Pipeline
+
+- Uses a local LaTeX compiler process (default `pdflatex`)
+- Injects helper overlays/markers into the temporary compile document for calibration and grid display
+- Loads generated PDF into preview canvas
+- Reports compile output and status in the console pane
 
 ## Settings
 
-`Edit -> Settings...` includes:
+`Edit -> Settings...` provides persistent application settings via `QSettings`:
 
 - editor font family
 - editor font size
-- line numbers visibility
-- auto-compile delay
-- LaTeX compiler command/path (default: `pdflatex`)
-- look and feel: `System`, `Light`, `Dark`
-- grid snap step and extent defaults
+- line number visibility
+- auto-compile debounce delay
+- LaTeX compiler command/path
+- look and feel (`System`, `Light`, `Dark`)
+- default grid/snap options
 
-Settings are persisted with `QSettings`.
+## Requirements
 
-## Examples
-
-The `Examples` menu includes ready-made snippets for:
-
-- line
-- polyline
-- circle
-- rectangle
-- ellipse
-- Bezier
-- mixed playground
-
-## Help Menu
-
-- `About QTikZ`
+- Qt 6 (Core, Widgets, Pdf)
+- CMake >= 3.21
+- A working LaTeX installation with `pdflatex` (or another configured compiler)
 
 ## Build
 
@@ -92,17 +100,26 @@ cmake --build build -j
 ./build/qtikz
 ```
 
-## Project Structure
+## Repository Layout
 
-- `src/main.cpp`: application entry point
-- `src/mainwindow.h`, `src/mainwindow.cpp`: main UI and application flow
-- `src/settingsdialog.h`, `src/settingsdialog.cpp`: application settings dialog
-- `src/pdfcanvas.h`, `src/pdfcanvas.cpp`: preview rendering, calibration, markers, drag logic
-- `src/compileservice.h`, `src/compileservice.cpp`: TeX generation, grid injection, compiler process execution
-- `src/coordinateparser.h`, `src/coordinateparser.cpp`: numeric geometry parsing and formatting
-- `src/model.h`: shared geometry data models
+- `src/main.cpp`: application bootstrap
+- `src/mainwindow.h`: main window interface and state
+- `src/mainwindow.cpp`: window construction, menus/toolbars, editor setup
+- `src/mainwindow_properties.cpp`: selection, properties logic, style/geometry application
+- `src/settingsdialog.h`, `src/settingsdialog.cpp`: settings dialog
+- `src/pdfcanvas.h`, `src/pdfcanvas.cpp`: preview rendering, interaction, marker drawing
+- `src/compileservice.h`, `src/compileservice.cpp`: compile orchestration and temporary document generation
+- `src/coordinateparser.h`, `src/coordinateparser.cpp`: parser utilities and source token mapping
+- `src/model.h`: shared primitive/reference models
 
-## Notes
+## Scope and Current Constraints
 
-- Calibration anchors are injected during compilation to align PDF pixels with TikZ coordinates.
-- Anchors are drawn on the top layer to remain detectable regardless of figure colors.
+QTikZ intentionally focuses on a defined subset of TikZ constructs.
+Complex or highly custom TikZ expressions may not be parsed into editable markers/properties.
+Source editing remains fully available for unsupported constructs.
+
+## License
+
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0-or-later)**.
+
+See `LICENSE` for the full text.
