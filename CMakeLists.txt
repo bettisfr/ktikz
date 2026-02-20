@@ -13,6 +13,7 @@ find_package(Qt6 6.4 REQUIRED COMPONENTS Core Widgets Pdf)
 add_executable(qtikz
     src/main.cpp
     src/mainwindow.cpp
+    src/mainwindow_properties.cpp
     src/mainwindow.h
     src/pdfcanvas.cpp
     src/pdfcanvas.h
