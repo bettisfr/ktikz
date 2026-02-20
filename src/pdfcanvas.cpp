@@ -116,6 +116,7 @@ void pdfcanvas::mousePressEvent(QMouseEvent *event) {
         if (calibration_valid_) {
             const int rect_idx = hit_test_rectangle_marker(event->position());
             if (rect_idx >= 0) {
+                emit selection_changed("rectangle", rect_idx, -1);
                 rectangle_dragging_ = true;
                 active_rectangle_index_ = rect_idx;
                 setCursor(Qt::CrossCursor);
@@ -124,6 +125,7 @@ void pdfcanvas::mousePressEvent(QMouseEvent *event) {
             }
             const int circle_idx = hit_test_circle_marker(event->position());
             if (circle_idx >= 0) {
+                emit selection_changed("circle", circle_idx, -1);
                 circle_dragging_ = true;
                 active_circle_index_ = circle_idx;
                 setCursor(Qt::CrossCursor);
@@ -132,6 +134,7 @@ void pdfcanvas::mousePressEvent(QMouseEvent *event) {
             }
             const int ellipse_rx_idx = hit_test_ellipse_rx_marker(event->position());
             if (ellipse_rx_idx >= 0) {
+                emit selection_changed("ellipse", ellipse_rx_idx, 0);
                 ellipse_dragging_ = true;
                 active_ellipse_index_ = ellipse_rx_idx;
                 ellipse_dragging_rx_ = true;
@@ -141,6 +144,7 @@ void pdfcanvas::mousePressEvent(QMouseEvent *event) {
             }
             const int ellipse_ry_idx = hit_test_ellipse_ry_marker(event->position());
             if (ellipse_ry_idx >= 0) {
+                emit selection_changed("ellipse", ellipse_ry_idx, 1);
                 ellipse_dragging_ = true;
                 active_ellipse_index_ = ellipse_ry_idx;
                 ellipse_dragging_rx_ = false;
@@ -150,6 +154,7 @@ void pdfcanvas::mousePressEvent(QMouseEvent *event) {
             }
             const int bezier_c1_idx = hit_test_bezier_c1_marker(event->position());
             if (bezier_c1_idx >= 0) {
+                emit selection_changed("bezier", bezier_c1_idx, 1);
                 bezier_dragging_ = true;
                 active_bezier_index_ = bezier_c1_idx;
                 bezier_dragging_c1_ = true;
@@ -159,6 +164,7 @@ void pdfcanvas::mousePressEvent(QMouseEvent *event) {
             }
             const int bezier_c2_idx = hit_test_bezier_c2_marker(event->position());
             if (bezier_c2_idx >= 0) {
+                emit selection_changed("bezier", bezier_c2_idx, 2);
                 bezier_dragging_ = true;
                 active_bezier_index_ = bezier_c2_idx;
                 bezier_dragging_c1_ = false;
@@ -168,6 +174,7 @@ void pdfcanvas::mousePressEvent(QMouseEvent *event) {
             }
             const int idx = hit_test_marker(event->position());
             if (idx >= 0) {
+                emit selection_changed("coordinate", idx, -1);
                 marker_dragging_ = true;
                 active_marker_index_ = idx;
                 setCursor(Qt::CrossCursor);
@@ -175,6 +182,7 @@ void pdfcanvas::mousePressEvent(QMouseEvent *event) {
                 return;
             }
         }
+        emit selection_changed(QString(), -1, -1);
         dragging_ = true;
         last_drag_pos_ = event->position();
         setCursor(Qt::ClosedHandCursor);

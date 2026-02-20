@@ -25,6 +25,7 @@ public:
     bool load_pdf(const QString &pdf_path);
 
 signals:
+    void selection_changed(const QString &type, int index, int subindex);
     void coordinate_dragged(int index, double x, double y);
     void circle_radius_dragged(int index, double radius);
     void ellipse_radii_dragged(int index, double rx, double ry);

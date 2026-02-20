@@ -1,13 +1,17 @@
 #include "mainwindow.h"
 
+#include <algorithm>
 #include <QAction>
 #include <QApplication>
 #include <QComboBox>
 #include <QCloseEvent>
+#include <QDoubleSpinBox>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFont>
+#include <QFormLayout>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
@@ -260,6 +264,7 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
     preview_canvas_ = new pdfcanvas(this);
 
     auto *splitter = new QSplitter(Qt::Horizontal, this);
+    auto *right_splitter = new QSplitter(Qt::Horizontal, splitter);
     splitter->addWidget(editor_);
 
     auto *right_pane = new QWidget(this);
@@ -297,8 +302,136 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
     controls_layout->addStretch(1);
 
     right_layout->addWidget(controls_row, 0);
-    splitter->addWidget(right_pane);
-    splitter->setSizes({600, 600});
+
+    auto *properties_pane = new QWidget(right_splitter);
+    properties_pane->setObjectName("propertiesPane");
+    properties_pane->setMinimumWidth(230);
+    auto *properties_layout = new QVBoxLayout(properties_pane);
+    properties_layout->setContentsMargins(8, 8, 8, 8);
+    properties_layout->setSpacing(6);
+    auto *properties_title = new QLabel("Properties", properties_pane);
+    QFont title_font = properties_title->font();
+    title_font.setBold(true);
+    properties_title->setFont(title_font);
+    auto *selection_label = new QLabel("Selection:", properties_pane);
+    props_selection_value_ = new QLabel("-", properties_pane);
+    props_selection_value_->setWordWrap(true);
+
+    auto mk_spin = [properties_pane]() {
+        auto *s = new QDoubleSpinBox(properties_pane);
+        s->setRange(-1000000.0, 1000000.0);
+        s->setDecimals(4);
+        s->setSingleStep(0.1);
+        return s;
+    };
+    props_label_1_ = new QLabel("Value 1", properties_pane);
+    props_label_2_ = new QLabel("Value 2", properties_pane);
+    props_label_3_ = new QLabel("Value 3", properties_pane);
+    props_label_4_ = new QLabel("Value 4", properties_pane);
+    props_value_1_ = mk_spin();
+    props_value_2_ = mk_spin();
+    props_value_3_ = mk_spin();
+    props_value_4_ = mk_spin();
+    connect(props_value_1_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double) {
+        apply_selected_geometry_changes();
+    });
+    connect(props_value_2_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double) {
+        apply_selected_geometry_changes();
+    });
+    connect(props_value_3_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double) {
+        apply_selected_geometry_changes();
+    });
+    connect(props_value_4_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double) {
+        apply_selected_geometry_changes();
+    });
+    auto *numeric_form = new QFormLayout;
+    numeric_form->setContentsMargins(0, 0, 0, 0);
+    numeric_form->addRow(props_label_1_, props_value_1_);
+    numeric_form->addRow(props_label_2_, props_value_2_);
+    numeric_form->addRow(props_label_3_, props_value_3_);
+    numeric_form->addRow(props_label_4_, props_value_4_);
+    auto *geometry_box = new QGroupBox("Geometry", properties_pane);
+    auto *geometry_box_layout = new QVBoxLayout(geometry_box);
+    geometry_box_layout->setContentsMargins(8, 8, 8, 8);
+    geometry_box_layout->addLayout(numeric_form);
+
+    props_color_combo_ = new QComboBox(properties_pane);
+    props_color_combo_->addItems(
+        {"(keep)", "black", "blue", "red", "green", "orange", "magenta", "brown", "cyan", "gray", "yellow"});
+    props_line_style_combo_ = new QComboBox(properties_pane);
+    props_line_style_combo_->addItems({"(keep)", "solid", "dashed", "dotted"});
+    props_thickness_combo_ = new QComboBox(properties_pane);
+    props_thickness_combo_->addItems({"(keep)", "thin", "semithick", "thick", "very thick", "ultra thick"});
+    props_draw_opacity_combo_ = new QComboBox(properties_pane);
+    props_draw_opacity_combo_->addItem("(keep)", -1.0);
+    for (int i = 1; i <= 10; ++i) {
+        const double v = static_cast<double>(i) / 10.0;
+        props_draw_opacity_combo_->addItem(QString::number(v, 'f', 1), v);
+    }
+    props_fill_color_combo_ = new QComboBox(properties_pane);
+    props_fill_color_combo_->addItems(
+        {"(keep)", "(none)", "black", "blue", "red", "green", "orange", "magenta", "brown", "cyan", "gray", "yellow"});
+    props_fill_opacity_combo_ = new QComboBox(properties_pane);
+    props_fill_opacity_combo_->addItem("(keep)", -1.0);
+    for (int i = 1; i <= 10; ++i) {
+        const double v = static_cast<double>(i) / 10.0;
+        props_fill_opacity_combo_->addItem(QString::number(v, 'f', 1), v);
+    }
+    connect(props_color_combo_, &QComboBox::currentTextChanged, this, [this](const QString &) {
+        apply_selected_style_changes();
+    });
+    connect(props_line_style_combo_, &QComboBox::currentTextChanged, this, [this](const QString &) {
+        apply_selected_style_changes();
+    });
+    connect(props_thickness_combo_, &QComboBox::currentTextChanged, this, [this](const QString &) {
+        apply_selected_style_changes();
+    });
+    connect(props_draw_opacity_combo_, &QComboBox::currentTextChanged, this, [this](const QString &) {
+        apply_selected_style_changes();
+    });
+    connect(props_fill_color_combo_, &QComboBox::currentTextChanged, this, [this](const QString &) {
+        apply_selected_style_changes();
+    });
+    connect(props_fill_opacity_combo_, &QComboBox::currentTextChanged, this, [this](const QString &) {
+        apply_selected_style_changes();
+    });
+    auto *border_form = new QFormLayout;
+    border_form->setContentsMargins(0, 0, 0, 0);
+    border_form->addRow("Color", props_color_combo_);
+    border_form->addRow("Style", props_line_style_combo_);
+    border_form->addRow("Thickness", props_thickness_combo_);
+    border_form->addRow("Opacity", props_draw_opacity_combo_);
+    auto *border_box = new QGroupBox("Border", properties_pane);
+    auto *border_box_layout = new QVBoxLayout(border_box);
+    border_box_layout->setContentsMargins(8, 8, 8, 8);
+    border_box_layout->addLayout(border_form);
+
+    auto *fill_form = new QFormLayout;
+    fill_form->setContentsMargins(0, 0, 0, 0);
+    fill_form->addRow("Color", props_fill_color_combo_);
+    fill_form->addRow("Opacity", props_fill_opacity_combo_);
+    auto *fill_box = new QGroupBox("Fill", properties_pane);
+    auto *fill_box_layout = new QVBoxLayout(fill_box);
+    fill_box_layout->setContentsMargins(8, 8, 8, 8);
+    fill_box_layout->addLayout(fill_form);
+    properties_layout->addWidget(properties_title);
+    properties_layout->addWidget(selection_label);
+    properties_layout->addWidget(props_selection_value_);
+    properties_layout->addWidget(geometry_box);
+    properties_layout->addWidget(border_box);
+    properties_layout->addWidget(fill_box);
+    properties_layout->addStretch(1);
+
+    right_splitter->addWidget(right_pane);
+    right_splitter->addWidget(properties_pane);
+    right_splitter->setStretchFactor(0, 4);
+    right_splitter->setStretchFactor(1, 1);
+    right_splitter->setSizes({780, 250});
+
+    splitter->addWidget(right_splitter);
+    splitter->setStretchFactor(0, 1);
+    splitter->setStretchFactor(1, 1);
+    splitter->setSizes({560, 840});
 
     output_ = new QTextEdit(this);
     output_->setReadOnly(true);
@@ -347,6 +480,7 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
     connect(preview_canvas_, &pdfcanvas::ellipse_radii_dragged, this, &mainwindow::on_ellipse_radii_dragged);
     connect(preview_canvas_, &pdfcanvas::bezier_control_dragged, this, &mainwindow::on_bezier_control_dragged);
     connect(preview_canvas_, &pdfcanvas::rectangle_corner_dragged, this, &mainwindow::on_rectangle_corner_dragged);
+    connect(preview_canvas_, &pdfcanvas::selection_changed, this, &mainwindow::on_canvas_selection_changed);
     connect(grid_step_combo_, &QComboBox::currentIndexChanged, this, &mainwindow::on_grid_step_changed);
     connect(grid_extent_spin_, &QSpinBox::valueChanged, this, &mainwindow::on_grid_extent_changed);
 
@@ -357,6 +491,7 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
     load_settings();
 
     create_menu_and_toolbar();
+    clear_properties_panel();
     statusBar()->showMessage("Ready");
 }
 
@@ -419,6 +554,7 @@ void mainwindow::request_compile(bool cancel_running) {
     ellipse_refs_ = coordinateparser::extract_ellipse_refs(source_text);
     bezier_refs_ = coordinateparser::extract_bezier_refs(source_text);
     rectangle_refs_ = coordinateparser::extract_rectangle_refs(source_text);
+    update_properties_panel();
     preview_canvas_->set_coordinates(coordinateparser::extract_pairs(source_text));
     preview_canvas_->set_circles(coordinateparser::extract_circle_pairs(source_text));
     preview_canvas_->set_ellipses(coordinateparser::extract_ellipse_pairs(source_text));
@@ -435,6 +571,7 @@ void mainwindow::replace_editor_text_preserve_undo(const QString &text) {
 }
 
 void mainwindow::on_editor_text_changed() {
+    update_properties_panel();
     if (suppress_auto_compile_) {
         return;
     }
@@ -632,7 +769,8 @@ void mainwindow::apply_theme(const QString &theme_id) {
             "QStatusBar{background-color:#2d2d2d;color:#e6e6e6;}"
             "QLabel{color:#e6e6e6;}"
             "QWidget#previewRightPane{background-color:#2d2d2d;}"
-            "QWidget#previewControlsRow{background-color:#2d2d2d;}");
+            "QWidget#previewControlsRow{background-color:#2d2d2d;}"
+            "QWidget#propertiesPane{background-color:#2d2d2d;}");
         return;
     }
 
@@ -1130,5 +1268,376 @@ void mainwindow::on_grid_step_changed(int) {
 void mainwindow::on_grid_extent_changed(int value) {
     grid_extent_cm_ = qBound(20, value, 100);
     statusBar()->showMessage("Grid extent: " + QString::number(grid_extent_cm_) + " cm", 1500);
+    request_compile(true);
+}
+
+void mainwindow::on_canvas_selection_changed(const QString &type, int index, int subindex) {
+    selected_type_ = type;
+    selected_index_ = index;
+    selected_subindex_ = subindex;
+    update_properties_panel();
+}
+
+bool mainwindow::replace_segments(QString &text, const std::vector<std::tuple<int, int, QString>> &segments) {
+    std::vector<std::tuple<int, int, QString>> sorted = segments;
+    std::sort(sorted.begin(), sorted.end(), [](const auto &a, const auto &b) { return std::get<0>(a) > std::get<0>(b); });
+    for (const auto &[start, end, replacement] : sorted) {
+        if (start < 0 || end <= start || end > text.size()) {
+            return false;
+        }
+        text.replace(start, end - start, replacement);
+    }
+    return true;
+}
+
+int mainwindow::selected_anchor_position() const {
+    if (selected_index_ < 0) {
+        return -1;
+    }
+    if (selected_type_ == "coordinate" && selected_index_ < static_cast<int>(coordinate_refs_.size())) {
+        return coordinate_refs_[selected_index_].start;
+    }
+    if (selected_type_ == "circle" && selected_index_ < static_cast<int>(circle_refs_.size())) {
+        return circle_refs_[selected_index_].radius_start;
+    }
+    if (selected_type_ == "ellipse" && selected_index_ < static_cast<int>(ellipse_refs_.size())) {
+        return ellipse_refs_[selected_index_].rx_start;
+    }
+    if (selected_type_ == "rectangle" && selected_index_ < static_cast<int>(rectangle_refs_.size())) {
+        return rectangle_refs_[selected_index_].x2_start;
+    }
+    if (selected_type_ == "bezier" && selected_index_ < static_cast<int>(bezier_refs_.size())) {
+        return bezier_refs_[selected_index_].x1_start;
+    }
+    return -1;
+}
+
+bool mainwindow::selected_command_span(int &start_out, int &end_out) const {
+    if (!editor_) {
+        return false;
+    }
+    const int anchor = selected_anchor_position();
+    if (anchor < 0) {
+        return false;
+    }
+    const QString text = editor_->toPlainText();
+    static const QRegularExpression draw_cmd(R"(\\draw(?:\s*\[[^\]]*\])?[\s\S]*?;)");
+    QRegularExpressionMatchIterator it = draw_cmd.globalMatch(text);
+    while (it.hasNext()) {
+        const QRegularExpressionMatch m = it.next();
+        const int s = m.capturedStart(0);
+        const int e = s + m.capturedLength(0);
+        if (anchor >= s && anchor < e) {
+            start_out = s;
+            end_out = e;
+            return true;
+        }
+    }
+    return false;
+}
+
+void mainwindow::clear_properties_panel(const QString &message) {
+    if (props_selection_value_) {
+        props_selection_value_->setText("-");
+    }
+    auto disable_spin = [](QLabel *lbl, QDoubleSpinBox *spin) {
+        if (lbl) {
+            lbl->hide();
+        }
+        if (spin) {
+            spin->hide();
+            spin->setEnabled(false);
+        }
+    };
+    disable_spin(props_label_1_, props_value_1_);
+    disable_spin(props_label_2_, props_value_2_);
+    disable_spin(props_label_3_, props_value_3_);
+    disable_spin(props_label_4_, props_value_4_);
+    if (props_color_combo_) {
+        const QSignalBlocker blocker(props_color_combo_);
+        props_color_combo_->setCurrentIndex(0);
+        props_color_combo_->setEnabled(!selected_type_.isEmpty());
+    }
+    if (props_line_style_combo_) {
+        const QSignalBlocker blocker(props_line_style_combo_);
+        props_line_style_combo_->setCurrentIndex(0);
+        props_line_style_combo_->setEnabled(!selected_type_.isEmpty());
+    }
+    if (props_thickness_combo_) {
+        const QSignalBlocker blocker(props_thickness_combo_);
+        props_thickness_combo_->setCurrentIndex(0);
+        props_thickness_combo_->setEnabled(!selected_type_.isEmpty());
+    }
+    if (props_draw_opacity_combo_) {
+        const QSignalBlocker blocker(props_draw_opacity_combo_);
+        props_draw_opacity_combo_->setCurrentIndex(0);
+        props_draw_opacity_combo_->setEnabled(!selected_type_.isEmpty());
+    }
+    if (props_fill_color_combo_) {
+        const QSignalBlocker blocker(props_fill_color_combo_);
+        props_fill_color_combo_->setCurrentIndex(0);
+        props_fill_color_combo_->setEnabled(!selected_type_.isEmpty());
+    }
+    if (props_fill_opacity_combo_) {
+        const QSignalBlocker blocker(props_fill_opacity_combo_);
+        props_fill_opacity_combo_->setCurrentIndex(0);
+        props_fill_opacity_combo_->setEnabled(!selected_type_.isEmpty());
+    }
+    Q_UNUSED(message)
+}
+
+void mainwindow::update_properties_panel() {
+    if (!props_selection_value_) {
+        return;
+    }
+    if (selected_type_.isEmpty() || selected_index_ < 0) {
+        clear_properties_panel();
+        return;
+    }
+
+    auto show_spin = [](QLabel *lbl, QDoubleSpinBox *spin, const QString &name, double value) {
+        if (!lbl || !spin) {
+            return;
+        }
+        lbl->setText(name);
+        lbl->show();
+        spin->show();
+        spin->setEnabled(true);
+        const QSignalBlocker blocker(spin);
+        spin->setValue(value);
+    };
+
+    suppress_properties_apply_ = true;
+    clear_properties_panel();
+    if (props_color_combo_) {
+        props_color_combo_->setEnabled(true);
+    }
+    if (props_line_style_combo_) {
+        props_line_style_combo_->setEnabled(true);
+    }
+    if (props_thickness_combo_) {
+        props_thickness_combo_->setEnabled(true);
+    }
+    if (props_draw_opacity_combo_) {
+        props_draw_opacity_combo_->setEnabled(true);
+    }
+    if (props_fill_color_combo_) {
+        props_fill_color_combo_->setEnabled(true);
+    }
+    if (props_fill_opacity_combo_) {
+        props_fill_opacity_combo_->setEnabled(true);
+    }
+
+    if (selected_type_ == "coordinate") {
+        if (selected_index_ >= static_cast<int>(coordinate_refs_.size())) {
+            clear_properties_panel();
+            return;
+        }
+        const coord_ref &c = coordinate_refs_[selected_index_];
+        props_selection_value_->setText("Coordinate #" + QString::number(selected_index_ + 1));
+        show_spin(props_label_1_, props_value_1_, "x", c.x);
+        show_spin(props_label_2_, props_value_2_, "y", c.y);
+        suppress_properties_apply_ = false;
+        return;
+    }
+
+    if (selected_type_ == "circle") {
+        if (selected_index_ >= static_cast<int>(circle_refs_.size())) {
+            clear_properties_panel();
+            return;
+        }
+        const circle_ref &c = circle_refs_[selected_index_];
+        props_selection_value_->setText("Circle #" + QString::number(selected_index_ + 1));
+        show_spin(props_label_1_, props_value_1_, "center x", c.cx);
+        show_spin(props_label_2_, props_value_2_, "center y", c.cy);
+        show_spin(props_label_3_, props_value_3_, "radius", c.r);
+        suppress_properties_apply_ = false;
+        return;
+    }
+
+    if (selected_type_ == "ellipse") {
+        if (selected_index_ >= static_cast<int>(ellipse_refs_.size())) {
+            clear_properties_panel();
+            return;
+        }
+        const ellipse_ref &e = ellipse_refs_[selected_index_];
+        props_selection_value_->setText("Ellipse #" + QString::number(selected_index_ + 1));
+        show_spin(props_label_1_, props_value_1_, "center x", e.cx);
+        show_spin(props_label_2_, props_value_2_, "center y", e.cy);
+        show_spin(props_label_3_, props_value_3_, "rx", e.rx);
+        show_spin(props_label_4_, props_value_4_, "ry", e.ry);
+        suppress_properties_apply_ = false;
+        return;
+    }
+
+    if (selected_type_ == "rectangle") {
+        if (selected_index_ >= static_cast<int>(rectangle_refs_.size())) {
+            clear_properties_panel();
+            return;
+        }
+        const rectangle_ref &r = rectangle_refs_[selected_index_];
+        props_selection_value_->setText("Rectangle #" + QString::number(selected_index_ + 1));
+        show_spin(props_label_1_, props_value_1_, "x1", r.x1);
+        show_spin(props_label_2_, props_value_2_, "y1", r.y1);
+        show_spin(props_label_3_, props_value_3_, "x2", r.x2);
+        show_spin(props_label_4_, props_value_4_, "y2", r.y2);
+        suppress_properties_apply_ = false;
+        return;
+    }
+
+    if (selected_type_ == "bezier") {
+        if (selected_index_ >= static_cast<int>(bezier_refs_.size())) {
+            clear_properties_panel();
+            return;
+        }
+        const bezier_ref &b = bezier_refs_[selected_index_];
+        props_selection_value_->setText(
+            "Bezier #" + QString::number(selected_index_ + 1) +
+            (selected_subindex_ == 1 ? " (control 1)" : (selected_subindex_ == 2 ? " (control 2)" : "")));
+        show_spin(props_label_1_, props_value_1_, "c1 x", b.x1);
+        show_spin(props_label_2_, props_value_2_, "c1 y", b.y1);
+        show_spin(props_label_3_, props_value_3_, "c2 x", b.x2);
+        show_spin(props_label_4_, props_value_4_, "c2 y", b.y2);
+        suppress_properties_apply_ = false;
+        return;
+    }
+
+    clear_properties_panel();
+    suppress_properties_apply_ = false;
+}
+
+void mainwindow::apply_selected_geometry_changes() {
+    if (suppress_properties_apply_ || !editor_ || selected_type_.isEmpty() || selected_index_ < 0) {
+        return;
+    }
+
+    QString text = editor_->toPlainText();
+    std::vector<std::tuple<int, int, QString>> segments;
+    auto num = [](QDoubleSpinBox *s) { return coordinateparser::format_number(s ? s->value() : 0.0); };
+
+    if (selected_type_ == "coordinate" && selected_index_ < static_cast<int>(coordinate_refs_.size())) {
+        const coord_ref &r = coordinate_refs_[selected_index_];
+        segments.push_back({r.x_start, r.x_end, num(props_value_1_)});
+        segments.push_back({r.y_start, r.y_end, num(props_value_2_)});
+    } else if (selected_type_ == "circle" && selected_index_ < static_cast<int>(circle_refs_.size())) {
+        const circle_ref &r = circle_refs_[selected_index_];
+        segments.push_back({r.cx_start, r.cx_end, num(props_value_1_)});
+        segments.push_back({r.cy_start, r.cy_end, num(props_value_2_)});
+        segments.push_back({r.radius_start, r.radius_end, num(props_value_3_)});
+    } else if (selected_type_ == "ellipse" && selected_index_ < static_cast<int>(ellipse_refs_.size())) {
+        const ellipse_ref &r = ellipse_refs_[selected_index_];
+        segments.push_back({r.cx_start, r.cx_end, num(props_value_1_)});
+        segments.push_back({r.cy_start, r.cy_end, num(props_value_2_)});
+        segments.push_back({r.rx_start, r.rx_end, num(props_value_3_)});
+        segments.push_back({r.ry_start, r.ry_end, num(props_value_4_)});
+    } else if (selected_type_ == "rectangle" && selected_index_ < static_cast<int>(rectangle_refs_.size())) {
+        const rectangle_ref &r = rectangle_refs_[selected_index_];
+        segments.push_back({r.x1_start, r.x1_end, num(props_value_1_)});
+        segments.push_back({r.y1_start, r.y1_end, num(props_value_2_)});
+        segments.push_back({r.x2_start, r.x2_end, num(props_value_3_)});
+        segments.push_back({r.y2_start, r.y2_end, num(props_value_4_)});
+    } else if (selected_type_ == "bezier" && selected_index_ < static_cast<int>(bezier_refs_.size())) {
+        const bezier_ref &r = bezier_refs_[selected_index_];
+        segments.push_back({r.x1_start, r.x1_end, num(props_value_1_)});
+        segments.push_back({r.y1_start, r.y1_end, num(props_value_2_)});
+        segments.push_back({r.x2_start, r.x2_end, num(props_value_3_)});
+        segments.push_back({r.y2_start, r.y2_end, num(props_value_4_)});
+    } else {
+        return;
+    }
+
+    if (!replace_segments(text, segments)) {
+        return;
+    }
+    replace_editor_text_preserve_undo(text);
+    request_compile(true);
+}
+
+void mainwindow::apply_selected_style_changes() {
+    if (suppress_properties_apply_ || !editor_ || selected_type_.isEmpty() || selected_index_ < 0) {
+        return;
+    }
+    int cmd_start = 0;
+    int cmd_end = 0;
+    if (!selected_command_span(cmd_start, cmd_end)) {
+        return;
+    }
+
+    QString text = editor_->toPlainText();
+    QString cmd = text.mid(cmd_start, cmd_end - cmd_start);
+    static const QRegularExpression draw_head(R"(^(\s*\\draw)\s*(\[[^\]]*\])?)");
+    const QRegularExpressionMatch m = draw_head.match(cmd);
+    if (!m.hasMatch()) {
+        return;
+    }
+
+    QStringList opts;
+    if (m.capturedStart(2) >= 0) {
+        QString o = m.captured(2);
+        o.remove(0, 1);
+        o.chop(1);
+        opts = o.split(',', Qt::SkipEmptyParts);
+        for (QString &v : opts) {
+            v = v.trimmed();
+        }
+    }
+
+    auto remove_tokens = [&opts](const QStringList &to_remove) {
+        opts.erase(
+            std::remove_if(opts.begin(), opts.end(), [&to_remove](const QString &v) { return to_remove.contains(v); }),
+            opts.end());
+    };
+    auto remove_prefix = [&opts](const QString &prefix) {
+        opts.erase(std::remove_if(opts.begin(), opts.end(), [&prefix](const QString &v) { return v.startsWith(prefix); }),
+                   opts.end());
+    };
+
+    const QString color = props_color_combo_ ? props_color_combo_->currentText() : QString("(keep)");
+    if (color != "(keep)") {
+        remove_tokens({"black", "blue", "red", "green", "orange", "magenta", "brown", "cyan", "gray", "yellow"});
+        remove_prefix("draw=");
+        opts.push_back("draw=" + color);
+    }
+
+    const QString line_style = props_line_style_combo_ ? props_line_style_combo_->currentText() : QString("(keep)");
+    if (line_style != "(keep)") {
+        remove_tokens({"dashed", "dotted", "solid"});
+        if (line_style != "solid") {
+            opts.push_back(line_style);
+        }
+    }
+
+    const QString thickness = props_thickness_combo_ ? props_thickness_combo_->currentText() : QString("(keep)");
+    if (thickness != "(keep)") {
+        remove_tokens({"ultra thin", "very thin", "thin", "semithick", "thick", "very thick", "ultra thick"});
+        opts.push_back(thickness);
+    }
+
+    const double draw_opacity = props_draw_opacity_combo_ ? props_draw_opacity_combo_->currentData().toDouble() : -1.0;
+    if (draw_opacity >= 0.0) {
+        remove_prefix("draw opacity=");
+        opts.push_back("draw opacity=" + coordinateparser::format_number(draw_opacity));
+    }
+
+    const QString fill_color = props_fill_color_combo_ ? props_fill_color_combo_->currentText() : QString("(keep)");
+    if (fill_color != "(keep)") {
+        remove_prefix("fill=");
+        if (fill_color == "(none)") {
+            opts.push_back("fill=none");
+        } else {
+            opts.push_back("fill=" + fill_color);
+        }
+    }
+
+    const double fill_opacity = props_fill_opacity_combo_ ? props_fill_opacity_combo_->currentData().toDouble() : -1.0;
+    if (fill_opacity >= 0.0) {
+        remove_prefix("fill opacity=");
+        opts.push_back("fill opacity=" + coordinateparser::format_number(fill_opacity));
+    }
+
+    const QString new_head = m.captured(1) + (opts.isEmpty() ? QString() : "[" + opts.join(",") + "]");
+    cmd.replace(0, m.capturedLength(0), new_head);
+    text.replace(cmd_start, cmd_end - cmd_start, cmd);
+    replace_editor_text_preserve_undo(text);
     request_compile(true);
 }

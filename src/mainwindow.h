@@ -3,12 +3,15 @@
 
 #include <QMainWindow>
 #include <QString>
+#include <tuple>
 #include <vector>
 
 #include "model.h"
 
 class QCloseEvent;
 class QComboBox;
+class QDoubleSpinBox;
+class QLabel;
 class QPlainTextEdit;
 class QSpinBox;
 class QTextEdit;
@@ -42,6 +45,9 @@ private slots:
     void on_rectangle_corner_dragged(int index, double x2, double y2);
     void on_grid_step_changed(int value);
     void on_grid_extent_changed(int value);
+    void on_canvas_selection_changed(const QString &type, int index, int subindex);
+    void apply_selected_geometry_changes();
+    void apply_selected_style_changes();
     void on_document_modified_changed(bool modified);
     void on_editor_text_changed();
     void on_auto_compile_timeout();
@@ -59,12 +65,32 @@ private:
     void apply_theme(const QString &theme_id);
     void load_settings();
     void save_settings() const;
+    void update_properties_panel();
+    void clear_properties_panel(const QString &message = QStringLiteral("No object selected"));
+    bool replace_segments(QString &text, const std::vector<std::tuple<int, int, QString>> &segments);
+    int selected_anchor_position() const;
+    bool selected_command_span(int &start_out, int &end_out) const;
 
     QPlainTextEdit *editor_ = nullptr;
     pdfcanvas *preview_canvas_ = nullptr;
     QTextEdit *output_ = nullptr;
     QComboBox *grid_step_combo_ = nullptr;
     QSpinBox *grid_extent_spin_ = nullptr;
+    QLabel *props_selection_value_ = nullptr;
+    QDoubleSpinBox *props_value_1_ = nullptr;
+    QDoubleSpinBox *props_value_2_ = nullptr;
+    QDoubleSpinBox *props_value_3_ = nullptr;
+    QDoubleSpinBox *props_value_4_ = nullptr;
+    QLabel *props_label_1_ = nullptr;
+    QLabel *props_label_2_ = nullptr;
+    QLabel *props_label_3_ = nullptr;
+    QLabel *props_label_4_ = nullptr;
+    QComboBox *props_color_combo_ = nullptr;
+    QComboBox *props_line_style_combo_ = nullptr;
+    QComboBox *props_thickness_combo_ = nullptr;
+    QComboBox *props_draw_opacity_combo_ = nullptr;
+    QComboBox *props_fill_color_combo_ = nullptr;
+    QComboBox *props_fill_opacity_combo_ = nullptr;
     compileservice *compile_service_ = nullptr;
     QTimer *auto_compile_timer_ = nullptr;
 
@@ -84,6 +110,10 @@ private:
     QString theme_id_ = QStringLiteral("system");
     bool suppress_auto_compile_ = false;
     bool pending_compile_ = false;
+    bool suppress_properties_apply_ = false;
+    QString selected_type_;
+    int selected_index_ = -1;
+    int selected_subindex_ = -1;
     QString current_file_path_;
 };
 

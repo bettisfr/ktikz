@@ -54,6 +54,10 @@ std::vector<coord_ref> extract_refs(const QString &source) {
         coord_ref ref;
         ref.start = m.capturedStart(0);
         ref.end = ref.start + m.capturedLength(0);
+        ref.x_start = m.capturedStart(1);
+        ref.x_end = ref.x_start + m.capturedLength(1);
+        ref.y_start = m.capturedStart(2);
+        ref.y_end = ref.y_start + m.capturedLength(2);
         ref.x = x;
         ref.y = y;
         refs.push_back(ref);
@@ -87,6 +91,10 @@ std::vector<circle_ref> extract_circle_refs(const QString &source) {
         }
 
         circle_ref ref;
+        ref.cx_start = m.capturedStart(1);
+        ref.cx_end = ref.cx_start + m.capturedLength(1);
+        ref.cy_start = m.capturedStart(2);
+        ref.cy_end = ref.cy_start + m.capturedLength(2);
         ref.radius_start = m.capturedStart(3);
         ref.radius_end = ref.radius_start + m.capturedLength(3);
         ref.cx = cx;
@@ -125,6 +133,10 @@ std::vector<ellipse_ref> extract_ellipse_refs(const QString &source) {
         }
 
         ellipse_ref ref;
+        ref.cx_start = m.capturedStart(1);
+        ref.cx_end = ref.cx_start + m.capturedLength(1);
+        ref.cy_start = m.capturedStart(2);
+        ref.cy_end = ref.cy_start + m.capturedLength(2);
         ref.rx_start = m.capturedStart(3);
         ref.rx_end = ref.rx_start + m.capturedLength(3);
         ref.ry_start = m.capturedStart(4);
@@ -198,6 +210,12 @@ std::vector<bezier_ref> extract_bezier_refs(const QString &source) {
         }
 
         bezier_ref ref;
+        if (has_explicit_start) {
+            ref.x0_start = m.capturedStart(1);
+            ref.x0_end = ref.x0_start + m.capturedLength(1);
+            ref.y0_start = m.capturedStart(2);
+            ref.y0_end = ref.y0_start + m.capturedLength(2);
+        }
         ref.x1_start = m.capturedStart(3);
         ref.x1_end = ref.x1_start + m.capturedLength(3);
         ref.y1_start = m.capturedStart(4);
@@ -252,6 +270,10 @@ std::vector<rectangle_ref> extract_rectangle_refs(const QString &source) {
         }
 
         rectangle_ref ref;
+        ref.x1_start = m.capturedStart(1);
+        ref.x1_end = ref.x1_start + m.capturedLength(1);
+        ref.y1_start = m.capturedStart(2);
+        ref.y1_end = ref.y1_start + m.capturedLength(2);
         ref.x2_start = m.capturedStart(3);
         ref.x2_end = ref.x2_start + m.capturedLength(3);
         ref.y2_start = m.capturedStart(4);
