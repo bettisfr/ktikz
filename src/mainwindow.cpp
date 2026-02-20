@@ -356,23 +356,19 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
     geometry_box_layout->addLayout(numeric_form);
 
     props_color_combo_ = new QComboBox(properties_pane);
-    props_color_combo_->addItems(
-        {"(keep)", "black", "blue", "red", "green", "orange", "magenta", "brown", "cyan", "gray", "yellow"});
+    props_color_combo_->addItems({"black", "blue", "red", "green", "orange", "magenta", "brown", "cyan", "gray", "yellow"});
     props_line_style_combo_ = new QComboBox(properties_pane);
-    props_line_style_combo_->addItems({"(keep)", "solid", "dashed", "dotted"});
+    props_line_style_combo_->addItems({"solid", "dashed", "dotted"});
     props_thickness_combo_ = new QComboBox(properties_pane);
-    props_thickness_combo_->addItems({"(keep)", "thin", "semithick", "thick", "very thick", "ultra thick"});
+    props_thickness_combo_->addItems({"thin", "semithick", "thick", "very thick", "ultra thick"});
     props_draw_opacity_combo_ = new QComboBox(properties_pane);
-    props_draw_opacity_combo_->addItem("(keep)", -1.0);
     for (int i = 1; i <= 10; ++i) {
         const double v = static_cast<double>(i) / 10.0;
         props_draw_opacity_combo_->addItem(QString::number(v, 'f', 1), v);
     }
     props_fill_color_combo_ = new QComboBox(properties_pane);
-    props_fill_color_combo_->addItems(
-        {"(keep)", "(none)", "black", "blue", "red", "green", "orange", "magenta", "brown", "cyan", "gray", "yellow"});
+    props_fill_color_combo_->addItems({"none", "black", "blue", "red", "green", "orange", "magenta", "brown", "cyan", "gray", "yellow"});
     props_fill_opacity_combo_ = new QComboBox(properties_pane);
-    props_fill_opacity_combo_->addItem("(keep)", -1.0);
     for (int i = 1; i <= 10; ++i) {
         const double v = static_cast<double>(i) / 10.0;
         props_fill_opacity_combo_->addItem(QString::number(v, 'f', 1), v);
@@ -1321,8 +1317,8 @@ bool mainwindow::selected_command_span(int &start_out, int &end_out) const {
         return false;
     }
     const QString text = editor_->toPlainText();
-    static const QRegularExpression draw_cmd(R"(\\draw(?:\s*\[[^\]]*\])?[\s\S]*?;)");
-    QRegularExpressionMatchIterator it = draw_cmd.globalMatch(text);
+    static const QRegularExpression drawable_cmd(R"(\\(?:draw|node)(?:\s*\[[^\]]*\])?[\s\S]*?;)");
+    QRegularExpressionMatchIterator it = drawable_cmd.globalMatch(text);
     while (it.hasNext()) {
         const QRegularExpressionMatch m = it.next();
         const int s = m.capturedStart(0);
@@ -1370,7 +1366,7 @@ void mainwindow::clear_properties_panel(const QString &message) {
     }
     if (props_draw_opacity_combo_) {
         const QSignalBlocker blocker(props_draw_opacity_combo_);
-        props_draw_opacity_combo_->setCurrentIndex(0);
+        props_draw_opacity_combo_->setCurrentIndex(props_draw_opacity_combo_->count() - 1);
         props_draw_opacity_combo_->setEnabled(!selected_type_.isEmpty());
     }
     if (props_fill_color_combo_) {
@@ -1380,7 +1376,7 @@ void mainwindow::clear_properties_panel(const QString &message) {
     }
     if (props_fill_opacity_combo_) {
         const QSignalBlocker blocker(props_fill_opacity_combo_);
-        props_fill_opacity_combo_->setCurrentIndex(0);
+        props_fill_opacity_combo_->setCurrentIndex(props_fill_opacity_combo_->count() - 1);
         props_fill_opacity_combo_->setEnabled(!selected_type_.isEmpty());
     }
     Q_UNUSED(message)
@@ -1426,6 +1422,116 @@ void mainwindow::update_properties_panel() {
     }
     if (props_fill_opacity_combo_) {
         props_fill_opacity_combo_->setEnabled(true);
+    }
+
+    int cmd_start = 0;
+    int cmd_end = 0;
+    if (selected_command_span(cmd_start, cmd_end) && editor_) {
+        const QString cmd = editor_->toPlainText().mid(cmd_start, cmd_end - cmd_start);
+        static const QRegularExpression draw_head(R"(^(\s*\\(?:draw|node))\s*(\[[^\]]*\])?)");
+        const QRegularExpressionMatch m = draw_head.match(cmd);
+        if (m.hasMatch() && m.capturedStart(2) >= 0) {
+            QString opts_text = m.captured(2);
+            opts_text.remove(0, 1);
+            opts_text.chop(1);
+            QStringList opts = opts_text.split(',', Qt::SkipEmptyParts);
+            for (QString &v : opts) {
+                v = v.trimmed();
+            }
+
+            auto find_prefix_value = [&opts](const QString &prefix) -> QString {
+                for (const QString &v : opts) {
+                    if (v.startsWith(prefix)) {
+                        return v.mid(prefix.size()).trimmed();
+                    }
+                }
+                return QString();
+            };
+            auto has_token = [&opts](const QString &token) { return opts.contains(token); };
+            auto set_combo_value = [](QComboBox *combo, const QString &value) {
+                if (!combo || value.isEmpty()) {
+                    return;
+                }
+                int idx = combo->findText(value);
+                if (idx < 0) {
+                    combo->addItem(value);
+                    idx = combo->findText(value);
+                }
+                const QSignalBlocker blocker(combo);
+                combo->setCurrentIndex(qMax(0, idx));
+            };
+            auto set_opacity_combo = [](QComboBox *combo, double value) {
+                if (!combo) {
+                    return;
+                }
+                const double clamped = qBound(0.1, value, 1.0);
+                const QString label = QString::number(std::round(clamped * 10.0) / 10.0, 'f', 1);
+                int idx = combo->findText(label);
+                if (idx < 0) {
+                    idx = combo->count() - 1;
+                }
+                const QSignalBlocker blocker(combo);
+                combo->setCurrentIndex(idx);
+            };
+
+            const QString command_name = m.captured(1).contains("\\node") ? QStringLiteral("node") : QStringLiteral("draw");
+            const QString explicit_draw = (command_name == "node") ? find_prefix_value("text=") : find_prefix_value("draw=");
+            QString draw_color = explicit_draw;
+            if (draw_color.isEmpty()) {
+                if (command_name == "node") {
+                    draw_color = find_prefix_value("color=");
+                }
+            }
+            if (draw_color.isEmpty()) {
+                const QStringList colors = {"black", "blue", "red", "green", "orange", "magenta", "brown", "cyan", "gray", "yellow"};
+                for (const QString &c : colors) {
+                    if (has_token(c)) {
+                        draw_color = c;
+                        break;
+                    }
+                }
+            }
+            if (draw_color.isEmpty()) {
+                draw_color = "black";
+            }
+            set_combo_value(props_color_combo_, draw_color);
+
+            QString style = "solid";
+            if (has_token("dashed")) {
+                style = "dashed";
+            } else if (has_token("dotted")) {
+                style = "dotted";
+            }
+            set_combo_value(props_line_style_combo_, style);
+
+            QString thick = "thin";
+            const QStringList thicknesses = {"ultra thick", "very thick", "thick", "semithick", "thin"};
+            for (const QString &t : thicknesses) {
+                if (has_token(t)) {
+                    thick = t;
+                    break;
+                }
+            }
+            set_combo_value(props_thickness_combo_, thick);
+
+            bool ok_draw_op = false;
+            const double draw_op = find_prefix_value("draw opacity=").toDouble(&ok_draw_op);
+            set_opacity_combo(props_draw_opacity_combo_, ok_draw_op ? draw_op : 1.0);
+
+            QString fill = find_prefix_value("fill=");
+            if (fill.isEmpty()) {
+                fill = "none";
+            }
+            if (fill == "none") {
+                set_combo_value(props_fill_color_combo_, "none");
+            } else {
+                set_combo_value(props_fill_color_combo_, fill);
+            }
+
+            bool ok_fill_op = false;
+            const double fill_op = find_prefix_value("fill opacity=").toDouble(&ok_fill_op);
+            set_opacity_combo(props_fill_opacity_combo_, ok_fill_op ? fill_op : 1.0);
+        }
     }
 
     if (selected_type_ == "coordinate") {
@@ -1565,11 +1671,12 @@ void mainwindow::apply_selected_style_changes() {
 
     QString text = editor_->toPlainText();
     QString cmd = text.mid(cmd_start, cmd_end - cmd_start);
-    static const QRegularExpression draw_head(R"(^(\s*\\draw)\s*(\[[^\]]*\])?)");
+    static const QRegularExpression draw_head(R"(^(\s*\\(?:draw|node))\s*(\[[^\]]*\])?)");
     const QRegularExpressionMatch m = draw_head.match(cmd);
     if (!m.hasMatch()) {
         return;
     }
+    const bool is_node_command = m.captured(1).contains("\\node");
 
     QStringList opts;
     if (m.capturedStart(2) >= 0) {
@@ -1592,48 +1699,42 @@ void mainwindow::apply_selected_style_changes() {
                    opts.end());
     };
 
-    const QString color = props_color_combo_ ? props_color_combo_->currentText() : QString("(keep)");
-    if (color != "(keep)") {
-        remove_tokens({"black", "blue", "red", "green", "orange", "magenta", "brown", "cyan", "gray", "yellow"});
+    const QString color = props_color_combo_ ? props_color_combo_->currentText() : QString("black");
+    remove_tokens({"black", "blue", "red", "green", "orange", "magenta", "brown", "cyan", "gray", "yellow"});
+    if (is_node_command) {
+        remove_prefix("text=");
+        remove_prefix("color=");
+        opts.push_back("text=" + color);
+    } else {
         remove_prefix("draw=");
         opts.push_back("draw=" + color);
     }
 
-    const QString line_style = props_line_style_combo_ ? props_line_style_combo_->currentText() : QString("(keep)");
-    if (line_style != "(keep)") {
-        remove_tokens({"dashed", "dotted", "solid"});
-        if (line_style != "solid") {
-            opts.push_back(line_style);
-        }
+    const QString line_style = props_line_style_combo_ ? props_line_style_combo_->currentText() : QString("solid");
+    remove_tokens({"dashed", "dotted", "solid"});
+    if (line_style != "solid") {
+        opts.push_back(line_style);
     }
 
-    const QString thickness = props_thickness_combo_ ? props_thickness_combo_->currentText() : QString("(keep)");
-    if (thickness != "(keep)") {
-        remove_tokens({"ultra thin", "very thin", "thin", "semithick", "thick", "very thick", "ultra thick"});
-        opts.push_back(thickness);
+    const QString thickness = props_thickness_combo_ ? props_thickness_combo_->currentText() : QString("thin");
+    remove_tokens({"ultra thin", "very thin", "thin", "semithick", "thick", "very thick", "ultra thick"});
+    opts.push_back(thickness);
+
+    const double draw_opacity = props_draw_opacity_combo_ ? props_draw_opacity_combo_->currentData().toDouble() : 1.0;
+    remove_prefix("draw opacity=");
+    opts.push_back("draw opacity=" + coordinateparser::format_number(draw_opacity));
+
+    const QString fill_color = props_fill_color_combo_ ? props_fill_color_combo_->currentText() : QString("none");
+    remove_prefix("fill=");
+    if (fill_color == "none") {
+        opts.push_back("fill=none");
+    } else {
+        opts.push_back("fill=" + fill_color);
     }
 
-    const double draw_opacity = props_draw_opacity_combo_ ? props_draw_opacity_combo_->currentData().toDouble() : -1.0;
-    if (draw_opacity >= 0.0) {
-        remove_prefix("draw opacity=");
-        opts.push_back("draw opacity=" + coordinateparser::format_number(draw_opacity));
-    }
-
-    const QString fill_color = props_fill_color_combo_ ? props_fill_color_combo_->currentText() : QString("(keep)");
-    if (fill_color != "(keep)") {
-        remove_prefix("fill=");
-        if (fill_color == "(none)") {
-            opts.push_back("fill=none");
-        } else {
-            opts.push_back("fill=" + fill_color);
-        }
-    }
-
-    const double fill_opacity = props_fill_opacity_combo_ ? props_fill_opacity_combo_->currentData().toDouble() : -1.0;
-    if (fill_opacity >= 0.0) {
-        remove_prefix("fill opacity=");
-        opts.push_back("fill opacity=" + coordinateparser::format_number(fill_opacity));
-    }
+    const double fill_opacity = props_fill_opacity_combo_ ? props_fill_opacity_combo_->currentData().toDouble() : 1.0;
+    remove_prefix("fill opacity=");
+    opts.push_back("fill opacity=" + coordinateparser::format_number(fill_opacity));
 
     const QString new_head = m.captured(1) + (opts.isEmpty() ? QString() : "[" + opts.join(",") + "]");
     cmd.replace(0, m.capturedLength(0), new_head);
