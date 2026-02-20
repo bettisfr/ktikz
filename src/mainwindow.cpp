@@ -22,6 +22,7 @@
 #include <QPainter>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QFrame>
 #include <QScrollArea>
 #include <QSplitter>
 #include <QSpinBox>
@@ -38,6 +39,8 @@
 #include <QSettings>
 #include <QTextStream>
 #include <QToolBar>
+#include <QToolButton>
+#include <QStyleOptionToolButton>
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QStyleFactory>
@@ -50,6 +53,32 @@
 
 namespace {
 class linenumberedit;
+class verticaltoolbutton : public QToolButton {
+public:
+    explicit verticaltoolbutton(QWidget *parent = nullptr) : QToolButton(parent) {}
+
+    QSize sizeHint() const override {
+        const QSize s = QToolButton::sizeHint();
+        return QSize(qMax(24, s.height() + 10), qMax(90, s.width() + 10));
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QStyleOptionToolButton opt;
+        initStyleOption(&opt);
+
+        QPainter painter(this);
+        style()->drawPrimitive(QStyle::PE_PanelButtonTool, &opt, &painter, this);
+
+        painter.save();
+        painter.translate(width() * 0.5, height() * 0.5);
+        painter.rotate(-90);
+        const QRect text_rect(-height() / 2, -width() / 2, height(), width());
+        painter.setPen(opt.palette.buttonText().color());
+        painter.drawText(text_rect, Qt::AlignCenter, text());
+        painter.restore();
+    }
+};
 
 class linenumberarea : public QWidget {
 public:
@@ -214,6 +243,16 @@ QString wrap_tikz_document(const QString &tikz_body) {
            "\\end{document}\n";
 }
 
+QString minimal_tikz_document_text() {
+    return "\\documentclass[tikz]{standalone}\n"
+           "\\usepackage{tikz}\n"
+           "\\begin{document}\n"
+           "\\begin{tikzpicture}\n"
+           "\n"
+           "\\end{tikzpicture}\n"
+           "\\end{document}\n";
+}
+
 void append_colored_log(QTextEdit *output, const QString &text, const QColor &color) {
     if (!output) {
         return;
@@ -256,7 +295,7 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
     editor_ = new linenumberedit(this);
     editor_->setFont(editor_font);
     editor_->setTabStopDistance(editor_->fontMetrics().horizontalAdvance(QStringLiteral(" ")) * 4);
-    editor_->setPlainText(QString());
+    editor_->setPlainText(minimal_tikz_document_text());
     editor_->document()->setModified(false);
     connect(editor_->document(), &QTextDocument::modificationChanged, this, &mainwindow::on_document_modified_changed);
     connect(editor_, &QPlainTextEdit::textChanged, this, &mainwindow::on_editor_text_changed);
@@ -442,12 +481,16 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
     auto *fill_box_layout = new QVBoxLayout(fill_box);
     fill_box_layout->setContentsMargins(8, 8, 8, 8);
     fill_box_layout->addLayout(fill_form);
+    props_delete_btn_ = new QPushButton("Delete Selected", properties_pane);
+    props_delete_btn_->setEnabled(false);
+    connect(props_delete_btn_, &QPushButton::clicked, this, &mainwindow::delete_selected_object);
     properties_layout->addWidget(properties_title);
     properties_layout->addWidget(selection_label);
     properties_layout->addWidget(props_selection_value_);
     properties_layout->addWidget(geometry_box);
     properties_layout->addWidget(border_box);
     properties_layout->addWidget(fill_box);
+    properties_layout->addWidget(props_delete_btn_);
     properties_layout->addStretch(1);
     properties_scroll->setWidget(properties_pane);
 
@@ -461,6 +504,61 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
     splitter->setStretchFactor(0, 1);
     splitter->setStretchFactor(1, 1);
     splitter->setSizes({560, 840});
+
+    left_main_splitter_ = new QSplitter(Qt::Horizontal, this);
+    left_panel_ = new QFrame(left_main_splitter_);
+    left_panel_->setObjectName("leftObjectsPanel");
+    left_panel_->setMinimumWidth(140);
+    auto *left_layout = new QVBoxLayout(left_panel_);
+    left_layout->setContentsMargins(8, 8, 8, 8);
+    left_layout->setSpacing(6);
+    auto *left_title = new QLabel("Objects", left_panel_);
+    QFont left_title_font = left_title->font();
+    left_title_font.setBold(true);
+    left_title->setFont(left_title_font);
+    left_layout->addWidget(left_title);
+    left_line_button_ = new QPushButton("Line", left_panel_);
+    left_layout->addWidget(left_line_button_);
+    left_polyline_button_ = new QPushButton("Polyline", left_panel_);
+    left_layout->addWidget(left_polyline_button_);
+    left_circle_button_ = new QPushButton("Circle", left_panel_);
+    left_layout->addWidget(left_circle_button_);
+    left_ellipse_button_ = new QPushButton("Ellipse", left_panel_);
+    left_layout->addWidget(left_ellipse_button_);
+    left_rectangle_button_ = new QPushButton("Rectangle", left_panel_);
+    left_layout->addWidget(left_rectangle_button_);
+    left_bezier_button_ = new QPushButton("Bezier", left_panel_);
+    left_layout->addWidget(left_bezier_button_);
+    left_node_button_ = new QPushButton("Text", left_panel_);
+    left_layout->addWidget(left_node_button_);
+    left_layout->addStretch(1);
+
+    left_main_splitter_->addWidget(left_panel_);
+    left_main_splitter_->addWidget(splitter);
+    left_main_splitter_->setStretchFactor(0, 0);
+    left_main_splitter_->setStretchFactor(1, 1);
+    left_main_splitter_->setSizes({0, 1400});
+
+    auto *left_tool_stripe = new QFrame(this);
+    left_tool_stripe->setObjectName("leftToolStripe");
+    left_tool_stripe->setFixedWidth(28);
+    auto *left_tool_layout = new QVBoxLayout(left_tool_stripe);
+    left_tool_layout->setContentsMargins(2, 4, 2, 4);
+    left_tool_layout->setSpacing(4);
+    left_panel_toggle_button_ = new verticaltoolbutton(left_tool_stripe);
+    left_panel_toggle_button_->setText("Add object");
+    left_panel_toggle_button_->setCheckable(true);
+    left_panel_toggle_button_->setToolTip("Toggle Objects Panel");
+    connect(left_panel_toggle_button_, &QToolButton::clicked, this, &mainwindow::toggle_left_panel);
+    left_tool_layout->addWidget(left_panel_toggle_button_);
+    left_tool_layout->addStretch(1);
+
+    auto *left_container = new QWidget(this);
+    auto *left_container_layout = new QHBoxLayout(left_container);
+    left_container_layout->setContentsMargins(0, 0, 0, 0);
+    left_container_layout->setSpacing(0);
+    left_container_layout->addWidget(left_tool_stripe);
+    left_container_layout->addWidget(left_main_splitter_, 1);
 
     output_ = new QTextEdit(this);
     output_->setReadOnly(true);
@@ -490,7 +588,7 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
     output_layout->addWidget(output_, 1);
 
     auto *main_splitter = new QSplitter(Qt::Vertical, this);
-    main_splitter->addWidget(splitter);
+    main_splitter->addWidget(left_container);
     main_splitter->addWidget(output_section);
     main_splitter->setSizes({650, 150});
 
@@ -513,6 +611,7 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
     connect(preview_canvas_, &pdfcanvas::bezier_control_dragged, this, &mainwindow::on_bezier_control_dragged);
     connect(preview_canvas_, &pdfcanvas::rectangle_corner_dragged, this, &mainwindow::on_rectangle_corner_dragged);
     connect(preview_canvas_, &pdfcanvas::selection_changed, this, &mainwindow::on_canvas_selection_changed);
+    connect(preview_canvas_, &pdfcanvas::add_point_clicked, this, &mainwindow::on_canvas_add_point);
     connect(grid_step_combo_, &QComboBox::currentIndexChanged, this, &mainwindow::on_grid_step_changed);
     connect(grid_extent_spin_, &QSpinBox::valueChanged, this, &mainwindow::on_grid_extent_changed);
 
@@ -525,6 +624,13 @@ mainwindow::mainwindow(QWidget *parent) : QMainWindow(parent) {
     create_menu_and_toolbar();
     clear_properties_panel();
     statusBar()->showMessage("Ready");
+    connect(left_line_button_, &QPushButton::clicked, this, &mainwindow::start_add_line_mode);
+    connect(left_polyline_button_, &QPushButton::clicked, this, &mainwindow::start_add_polyline_mode);
+    connect(left_circle_button_, &QPushButton::clicked, this, &mainwindow::start_add_circle_mode);
+    connect(left_rectangle_button_, &QPushButton::clicked, this, &mainwindow::start_add_rectangle_mode);
+    connect(left_ellipse_button_, &QPushButton::clicked, this, &mainwindow::start_add_ellipse_mode);
+    connect(left_bezier_button_, &QPushButton::clicked, this, &mainwindow::start_add_bezier_mode);
+    connect(left_node_button_, &QPushButton::clicked, this, &mainwindow::start_add_node_mode);
 }
 
 void mainwindow::closeEvent(QCloseEvent *event) {
@@ -533,6 +639,10 @@ void mainwindow::closeEvent(QCloseEvent *event) {
     } else {
         event->ignore();
     }
+}
+
+QString mainwindow::minimal_tikz_document() {
+    return minimal_tikz_document_text();
 }
 
 void mainwindow::update_window_title() {
@@ -616,9 +726,206 @@ void mainwindow::on_auto_compile_timeout() {
     request_compile(true);
 }
 
+void mainwindow::toggle_left_panel() {
+    if (!left_main_splitter_ || !left_panel_) {
+        return;
+    }
+    const QList<int> sizes = left_main_splitter_->sizes();
+    const bool currently_hidden = sizes.isEmpty() || sizes[0] < 20;
+    if (currently_hidden) {
+        left_main_splitter_->setSizes({170, qMax(400, width() - 170)});
+        if (left_panel_toggle_button_) {
+            left_panel_toggle_button_->setChecked(true);
+        }
+    } else {
+        left_main_splitter_->setSizes({0, qMax(400, width())});
+        if (left_panel_toggle_button_) {
+            left_panel_toggle_button_->setChecked(false);
+        }
+    }
+}
+
+void mainwindow::set_add_object_mode(const QString &mode) {
+    add_object_mode_ = mode;
+    const bool enabled = !add_object_mode_.isEmpty();
+    if (preview_canvas_) {
+        preview_canvas_->set_add_line_mode(enabled);
+        if (enabled) {
+            preview_canvas_->setCursor(Qt::CrossCursor);
+        } else {
+            preview_canvas_->unsetCursor();
+        }
+    }
+    if (left_line_button_) {
+        left_line_button_->setDown(add_object_mode_ == "line");
+    }
+    if (left_polyline_button_) {
+        left_polyline_button_->setDown(add_object_mode_ == "polyline");
+    }
+    if (left_circle_button_) {
+        left_circle_button_->setDown(add_object_mode_ == "circle");
+    }
+    if (left_rectangle_button_) {
+        left_rectangle_button_->setDown(add_object_mode_ == "rectangle");
+    }
+    if (left_ellipse_button_) {
+        left_ellipse_button_->setDown(add_object_mode_ == "ellipse");
+    }
+    if (left_bezier_button_) {
+        left_bezier_button_->setDown(add_object_mode_ == "bezier");
+    }
+    if (left_node_button_) {
+        left_node_button_->setDown(add_object_mode_ == "node");
+    }
+}
+
+void mainwindow::start_add_line_mode() {
+    ensure_minimal_document_loaded();
+    set_add_object_mode(add_object_mode_ == "line" ? QString() : QStringLiteral("line"));
+    if (add_object_mode_ == "line") {
+        statusBar()->showMessage("Add Line: click in preview to place line", 3000);
+    } else {
+        statusBar()->showMessage("Add object canceled", 1500);
+    }
+}
+
+void mainwindow::start_add_polyline_mode() {
+    ensure_minimal_document_loaded();
+    set_add_object_mode(add_object_mode_ == "polyline" ? QString() : QStringLiteral("polyline"));
+    if (add_object_mode_ == "polyline") {
+        statusBar()->showMessage("Add Polyline: click in preview to place", 3000);
+    } else {
+        statusBar()->showMessage("Add object canceled", 1500);
+    }
+}
+
+void mainwindow::start_add_circle_mode() {
+    ensure_minimal_document_loaded();
+    set_add_object_mode(add_object_mode_ == "circle" ? QString() : QStringLiteral("circle"));
+    if (add_object_mode_ == "circle") {
+        statusBar()->showMessage("Add Circle: click in preview to place", 3000);
+    } else {
+        statusBar()->showMessage("Add object canceled", 1500);
+    }
+}
+
+void mainwindow::start_add_rectangle_mode() {
+    ensure_minimal_document_loaded();
+    set_add_object_mode(add_object_mode_ == "rectangle" ? QString() : QStringLiteral("rectangle"));
+    if (add_object_mode_ == "rectangle") {
+        statusBar()->showMessage("Add Rectangle: click in preview to place", 3000);
+    } else {
+        statusBar()->showMessage("Add object canceled", 1500);
+    }
+}
+
+void mainwindow::start_add_ellipse_mode() {
+    ensure_minimal_document_loaded();
+    set_add_object_mode(add_object_mode_ == "ellipse" ? QString() : QStringLiteral("ellipse"));
+    if (add_object_mode_ == "ellipse") {
+        statusBar()->showMessage("Add Ellipse: click in preview to place", 3000);
+    } else {
+        statusBar()->showMessage("Add object canceled", 1500);
+    }
+}
+
+void mainwindow::start_add_bezier_mode() {
+    ensure_minimal_document_loaded();
+    set_add_object_mode(add_object_mode_ == "bezier" ? QString() : QStringLiteral("bezier"));
+    if (add_object_mode_ == "bezier") {
+        statusBar()->showMessage("Add Bezier: click in preview to place", 3000);
+    } else {
+        statusBar()->showMessage("Add object canceled", 1500);
+    }
+}
+
+void mainwindow::start_add_node_mode() {
+    ensure_minimal_document_loaded();
+    set_add_object_mode(add_object_mode_ == "node" ? QString() : QStringLiteral("node"));
+    if (add_object_mode_ == "node") {
+        statusBar()->showMessage("Add Text: click in preview to place", 3000);
+    } else {
+        statusBar()->showMessage("Add object canceled", 1500);
+    }
+}
+
+void mainwindow::ensure_minimal_document_loaded() {
+    if (!editor_) {
+        return;
+    }
+    if (editor_->toPlainText().trimmed().isEmpty()) {
+        replace_editor_text_preserve_undo(minimal_tikz_document());
+        editor_->document()->setModified(false);
+        update_window_title();
+    }
+}
+
+void mainwindow::on_canvas_add_point(double x, double y) {
+    if (!editor_ || add_object_mode_.isEmpty()) {
+        return;
+    }
+    QString text = editor_->toPlainText();
+    if (text.trimmed().isEmpty()) {
+        text = minimal_tikz_document();
+    }
+    const QString end_tag = "\\end{tikzpicture}";
+    int pos = text.indexOf(end_tag);
+    if (pos < 0) {
+        text = minimal_tikz_document();
+        pos = text.indexOf(end_tag);
+    }
+    if (pos < 0) {
+        return;
+    }
+
+    const QString x0 = coordinateparser::format_number(x);
+    const QString y0 = coordinateparser::format_number(y);
+    const QString x1 = coordinateparser::format_number(x + 2.0);
+    const QString y1 = coordinateparser::format_number(y + 1.0);
+    QString cmd;
+    if (add_object_mode_ == "line") {
+        cmd = "  \\draw (" + x0 + "," + y0 + ") -- (" + x1 + "," + y1 + ");\n";
+    } else if (add_object_mode_ == "polyline") {
+        const QString x2 = coordinateparser::format_number(x + 1.2);
+        const QString y2 = coordinateparser::format_number(y + 1.6);
+        const QString x3 = coordinateparser::format_number(x + 2.5);
+        const QString y3 = coordinateparser::format_number(y + 0.2);
+        const QString x4 = coordinateparser::format_number(x + 3.4);
+        const QString y4 = coordinateparser::format_number(y + 1.4);
+        cmd = "  \\draw (" + x0 + "," + y0 + ") -- (" + x2 + "," + y2 + ") -- (" + x3 + "," + y3 + ") -- (" + x4 +
+              "," + y4 + ");\n";
+    } else if (add_object_mode_ == "circle") {
+        cmd = "  \\draw (" + x0 + "," + y0 + ") circle (1);\n";
+    } else if (add_object_mode_ == "ellipse") {
+        cmd = "  \\draw (" + x0 + "," + y0 + ") ellipse (1 and 0.6);\n";
+    } else if (add_object_mode_ == "rectangle") {
+        const QString x2 = coordinateparser::format_number(x + 2.0);
+        const QString y2 = coordinateparser::format_number(y + 1.2);
+        cmd = "  \\draw (" + x0 + "," + y0 + ") rectangle (" + x2 + "," + y2 + ");\n";
+    } else if (add_object_mode_ == "bezier") {
+        const QString x2 = coordinateparser::format_number(x + 1.0);
+        const QString y2 = coordinateparser::format_number(y + 1.5);
+        const QString x3 = coordinateparser::format_number(x + 2.0);
+        const QString y3 = coordinateparser::format_number(y - 1.0);
+        const QString x4 = coordinateparser::format_number(x + 3.0);
+        const QString y4 = coordinateparser::format_number(y + 0.8);
+        cmd = "  \\draw (" + x0 + "," + y0 + ") .. controls (" + x2 + "," + y2 + ") and (" + x3 + "," + y3 +
+              ") .. (" + x4 + "," + y4 + ");\n";
+    } else if (add_object_mode_ == "node") {
+        cmd = "  \\node at (" + x0 + "," + y0 + ") {Text};\n";
+    } else {
+        return;
+    }
+    text.insert(pos, cmd);
+    replace_editor_text_preserve_undo(text);
+    set_add_object_mode(QString());
+    request_compile(true);
+}
+
 void mainwindow::create_menu_and_toolbar() {
     auto *file_menu = menuBar()->addMenu("File");
     auto *edit_menu = menuBar()->addMenu("Edit");
+    auto *view_menu = menuBar()->addMenu("View");
     auto *build_menu = menuBar()->addMenu("Build");
     auto *examples_menu = menuBar()->addMenu("Examples");
     auto *help_menu = menuBar()->addMenu("Help");
@@ -630,6 +937,7 @@ void mainwindow::create_menu_and_toolbar() {
     auto *undo_act = new QAction(QIcon::fromTheme("edit-undo"), "Undo", this);
     auto *redo_act = new QAction(QIcon::fromTheme("edit-redo"), "Redo", this);
     auto *indent_act = new QAction(QIcon::fromTheme("format-indent-more"), "Indent", this);
+    auto *left_panel_act = new QAction(QIcon::fromTheme("view-sidebar"), "Objects Panel", this);
     auto *settings_act = new QAction(QIcon::fromTheme("preferences-system"), "Settings...", this);
     auto *compile_act = new QAction(QIcon::fromTheme("system-run"), "Compile", this);
     auto *quit_act = new QAction(QIcon::fromTheme("application-exit"), "Quit", this);
@@ -647,6 +955,7 @@ void mainwindow::create_menu_and_toolbar() {
     undo_act->setShortcut(QKeySequence::Undo);
     redo_act->setShortcut(QKeySequence::Redo);
     indent_act->setShortcut(QKeySequence("Ctrl+Shift+I"));
+    left_panel_act->setShortcut(QKeySequence("F9"));
     settings_act->setShortcut(QKeySequence("Ctrl+,"));
     compile_act->setShortcut(QKeySequence("F5"));
     quit_act->setShortcut(QKeySequence::Quit);
@@ -666,6 +975,7 @@ void mainwindow::create_menu_and_toolbar() {
         }
     });
     connect(indent_act, &QAction::triggered, this, &mainwindow::indent_latex);
+    connect(left_panel_act, &QAction::triggered, this, &mainwindow::toggle_left_panel);
     connect(settings_act, &QAction::triggered, this, &mainwindow::open_settings);
     connect(compile_act, &QAction::triggered, this, &mainwindow::compile);
     connect(quit_act, &QAction::triggered, this, &QWidget::close);
@@ -726,6 +1036,7 @@ void mainwindow::create_menu_and_toolbar() {
     edit_menu->addAction(redo_act);
     edit_menu->addSeparator();
     edit_menu->addAction(settings_act);
+    view_menu->addAction(left_panel_act);
     build_menu->addAction(compile_act);
     build_menu->addAction(indent_act);
     help_menu->addAction(about_ktikz_act);
@@ -741,6 +1052,8 @@ void mainwindow::create_menu_and_toolbar() {
     toolbar->addSeparator();
     toolbar->addAction(undo_act);
     toolbar->addAction(redo_act);
+    toolbar->addSeparator();
+    toolbar->addAction(left_panel_act);
     toolbar->addSeparator();
     toolbar->addAction(indent_act);
     toolbar->addAction(compile_act);
@@ -800,6 +1113,7 @@ void mainwindow::apply_theme(const QString &theme_id) {
             "QToolBar{background-color:#2d2d2d;border-bottom:1px solid #3f3f3f;}"
             "QStatusBar{background-color:#2d2d2d;color:#e6e6e6;}"
             "QLabel{color:#e6e6e6;}"
+            "QFrame#leftToolStripe{background-color:#1f2937;border-right:1px solid #374151;}"
             "QWidget#previewRightPane{background-color:#2d2d2d;}"
             "QWidget#previewControlsRow{background-color:#2d2d2d;}"
             "QWidget#propertiesPane{background-color:#2d2d2d;}"

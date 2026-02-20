@@ -22,9 +22,11 @@ public:
     void set_beziers(const std::vector<bezier_pair> &beziers);
     void set_rectangles(const std::vector<rectangle_pair> &rectangles);
     void set_snap_mm(int mm);
+    void set_add_line_mode(bool enabled);
     bool load_pdf(const QString &pdf_path);
 
 signals:
+    void add_point_clicked(double x, double y);
     void selection_changed(const QString &type, int index, int subindex);
     void coordinate_dragged(int index, double x, double y);
     void circle_radius_dragged(int index, double radius);
@@ -78,6 +80,7 @@ private:
     bool bezier_dragging_c1_ = true;
     bool rectangle_dragging_ = false;
     int active_rectangle_index_ = -1;
+    bool add_line_mode_ = false;
     std::vector<coord_pair> coordinates_;
     std::vector<circle_pair> circles_;
     std::vector<ellipse_pair> ellipses_;

@@ -42,6 +42,10 @@ void pdfcanvas::set_snap_mm(int mm) {
     snap_mm_ = qMax(0, mm);
 }
 
+void pdfcanvas::set_add_line_mode(bool enabled) {
+    add_line_mode_ = enabled;
+}
+
 bool pdfcanvas::load_pdf(const QString &pdf_path) {
     rendered_image_ = QImage();
     rendered_size_ = QSize();
@@ -113,6 +117,19 @@ void pdfcanvas::wheelEvent(QWheelEvent *event) {
 
 void pdfcanvas::mousePressEvent(QMouseEvent *event) {
     if (event->button() == Qt::LeftButton) {
+        if (add_line_mode_) {
+            QPointF world;
+            if (screen_to_world(event->position(), world)) {
+                if (snap_mm_ > 0) {
+                    const double step = static_cast<double>(snap_mm_) / 10.0;
+                    world.setX(std::round(world.x() / step) * step);
+                    world.setY(std::round(world.y() / step) * step);
+                }
+                emit add_point_clicked(world.x(), world.y());
+                event->accept();
+                return;
+            }
+        }
         if (calibration_valid_) {
             const int rect_idx = hit_test_rectangle_marker(event->position());
             if (rect_idx >= 0) {

@@ -13,9 +13,13 @@ class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
 class QPlainTextEdit;
+class QPushButton;
+class QSplitter;
 class QSpinBox;
 class QTextEdit;
 class QTimer;
+class QToolButton;
+class QWidget;
 
 class compileservice;
 class pdfcanvas;
@@ -48,10 +52,20 @@ private slots:
     void on_canvas_selection_changed(const QString &type, int index, int subindex);
     void apply_selected_geometry_changes();
     void apply_selected_style_changes();
+    void delete_selected_object();
+    void start_add_line_mode();
+    void start_add_polyline_mode();
+    void start_add_circle_mode();
+    void start_add_rectangle_mode();
+    void start_add_ellipse_mode();
+    void start_add_bezier_mode();
+    void start_add_node_mode();
+    void on_canvas_add_point(double x, double y);
     void on_document_modified_changed(bool modified);
     void on_editor_text_changed();
     void on_auto_compile_timeout();
     void open_settings();
+    void toggle_left_panel();
 
 private:
     void create_menu_and_toolbar();
@@ -67,11 +81,24 @@ private:
     void save_settings() const;
     void update_properties_panel();
     void clear_properties_panel(const QString &message = QStringLiteral("No object selected"));
+    static QString minimal_tikz_document();
+    void ensure_minimal_document_loaded();
+    void set_add_object_mode(const QString &mode);
     bool replace_segments(QString &text, const std::vector<std::tuple<int, int, QString>> &segments);
     int selected_anchor_position() const;
     bool selected_command_span(int &start_out, int &end_out) const;
 
     QPlainTextEdit *editor_ = nullptr;
+    QWidget *left_panel_ = nullptr;
+    QSplitter *left_main_splitter_ = nullptr;
+    QToolButton *left_panel_toggle_button_ = nullptr;
+    QPushButton *left_line_button_ = nullptr;
+    QPushButton *left_polyline_button_ = nullptr;
+    QPushButton *left_circle_button_ = nullptr;
+    QPushButton *left_rectangle_button_ = nullptr;
+    QPushButton *left_ellipse_button_ = nullptr;
+    QPushButton *left_bezier_button_ = nullptr;
+    QPushButton *left_node_button_ = nullptr;
     pdfcanvas *preview_canvas_ = nullptr;
     QTextEdit *output_ = nullptr;
     QComboBox *grid_step_combo_ = nullptr;
@@ -93,6 +120,7 @@ private:
     QComboBox *props_draw_opacity_combo_ = nullptr;
     QComboBox *props_fill_color_combo_ = nullptr;
     QComboBox *props_fill_opacity_combo_ = nullptr;
+    QPushButton *props_delete_btn_ = nullptr;
     compileservice *compile_service_ = nullptr;
     QTimer *auto_compile_timer_ = nullptr;
 
@@ -113,6 +141,7 @@ private:
     bool suppress_auto_compile_ = false;
     bool pending_compile_ = false;
     bool suppress_properties_apply_ = false;
+    QString add_object_mode_;
     QString selected_type_;
     int selected_index_ = -1;
     int selected_subindex_ = -1;

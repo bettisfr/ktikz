@@ -3,7 +3,9 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QLabel>
+#include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QPushButton>
 #include <QRegularExpression>
 #include <QSignalBlocker>
 #include <QStatusBar>
@@ -324,6 +326,9 @@ void mainwindow::clear_properties_panel(const QString &message) {
         props_fill_opacity_combo_->setCurrentIndex(props_fill_opacity_combo_->count() - 1);
         props_fill_opacity_combo_->setEnabled(!selected_type_.isEmpty());
     }
+    if (props_delete_btn_) {
+        props_delete_btn_->setEnabled(!selected_type_.isEmpty());
+    }
     Q_UNUSED(message)
 }
 
@@ -373,6 +378,9 @@ void mainwindow::update_properties_panel() {
     }
     if (props_fill_opacity_combo_) {
         props_fill_opacity_combo_->setEnabled(true);
+    }
+    if (props_delete_btn_) {
+        props_delete_btn_->setEnabled(true);
     }
 
     int cmd_start = 0;
@@ -535,6 +543,7 @@ void mainwindow::update_properties_panel() {
                 props_endpoint_start_combo_->setEnabled(false);
                 props_endpoint_end_combo_->setEnabled(false);
             }
+
         }
     }
 
@@ -781,4 +790,55 @@ void mainwindow::apply_selected_style_changes() {
     text.replace(cmd_start, cmd_end - cmd_start, cmd);
     replace_editor_text_preserve_undo(text);
     request_compile(true);
+}
+
+
+void mainwindow::delete_selected_object() {
+    if (!editor_ || selected_type_.isEmpty() || selected_index_ < 0) {
+        return;
+    }
+
+    int cmd_start = 0;
+    int cmd_end = 0;
+    if (!selected_command_span(cmd_start, cmd_end)) {
+        statusBar()->showMessage("No object command found to delete", 2500);
+        return;
+    }
+
+    QMessageBox box(this);
+    box.setWindowTitle("Delete object");
+    box.setText("Delete selected object from source?");
+    box.setInformativeText("This action will remove the corresponding TikZ command.");
+    box.setIcon(QMessageBox::Warning);
+    QAbstractButton *delete_btn = box.addButton("Delete", QMessageBox::DestructiveRole);
+    box.addButton("Cancel", QMessageBox::RejectRole);
+    box.setDefaultButton(static_cast<QPushButton *>(delete_btn));
+    box.exec();
+    if (box.clickedButton() != delete_btn) {
+        return;
+    }
+
+    QString text = editor_->toPlainText();
+    if (cmd_start < 0 || cmd_end <= cmd_start || cmd_end > text.size()) {
+        return;
+    }
+
+    int erase_start = cmd_start;
+    int erase_end = cmd_end;
+    if (erase_end < text.size() && text[erase_end] == '\n') {
+        ++erase_end;
+    } else {
+        while (erase_start > 0 && text[erase_start - 1] != '\n' && text[erase_start - 1].isSpace()) {
+            --erase_start;
+        }
+    }
+
+    text.remove(erase_start, erase_end - erase_start);
+    replace_editor_text_preserve_undo(text);
+    selected_type_.clear();
+    selected_index_ = -1;
+    selected_subindex_ = -1;
+    clear_properties_panel();
+    request_compile(true);
+    statusBar()->showMessage("Selected object deleted", 2000);
 }
